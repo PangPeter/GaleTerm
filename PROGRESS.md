@@ -4,9 +4,10 @@
 
 **项目路径**：`/Users/makerv/myDisk/xgs_project/gale-term`  
 **目标**：Rust 跨平台通用终端 / SSH 客户端，功能面囊括 WindTerm（非源码 1:1）  
-**当前阶段**：Phase 3.5 进行中 — VNC / RDP MVP 已可连；下一步 SSH 隧道与剪贴板/缩放  
+**当前阶段**：Phase 3.5 进行中 — 远程桌面 MVP + 隧道 + 文本剪贴板已可；下一步缩放 / 全屏 / 重连、RDP CLIPRDR  
+
 **本地 VNC 测试**：`docker start gale-vnc-test`（`127.0.0.1:5901`，密码 `secret`）；停用 `docker rm -f gale-vnc-test`  
-**本地 RDP 测试**：`docker start gale-rdp-test`（`127.0.0.1:3389`，账号 `ubuntu`/`ubuntu`，镜像 `danielguerra/ubuntu-xrdp`；探针 `cargo run -p gale-rdp --example probe -- 127.0.0.1 3389 ubuntu ubuntu`）  
+**本地 RDP 测试**：`docker start gale-rdp-test`（`127.0.0.1:3389` RDP / `2222` SSH，账号 `ubuntu`/`ubuntu`，镜像 `danielguerra/ubuntu-xrdp`；探针 `cargo run -p gale-rdp --example probe -- 127.0.0.1 3389 ubuntu ubuntu`；隧道 `cargo run -p gale-ssh --example tunnel_probe -- --ssh-host 127.0.0.1 --ssh-port 2222 --ssh-user ubuntu --ssh-password ubuntu --dest 127.0.0.1:3389`）  
 **测试机**：`makerv@192.168.55.3`（Ubuntu，OpenSSH 9.6，仅密码登录）可用于远程联调  
 **更新日期**：2026-11-19
 
@@ -105,11 +106,14 @@ Phase 2 可选长尾（不阻塞 Phase 3）：ProxyCommand、ControlMaster、ZMo
 ### 紧随：Phase 3.5（RDP / VNC）
 
 1. ~~`gale-vnc`：RFB MVP → gpui 帧显示 + 键鼠~~ ✅（`crates/gale-vnc`：RFB 3.8、VNC DES 密码认证、Raw/CopyRect、BGRA 帧缓冲；`crates/gale-desktop-view` 绘制 + 键鼠；桌面 `vnc://` / 主机卡开 Tab；钥匙串复用；Docker `dorowu/ubuntu-desktop-lxde-vnc` 于 `127.0.0.1:5901` 实测握手与出帧）  
-   - **后续（VNC）**：ZRLE/Tight、本地光标、剪贴板双向、缩放/全屏、SSH `jump_session_id` 隧道  
+   - **后续（VNC）**：ZRLE/Tight、本地光标、剪贴板双向、缩放/全屏  
 2. ~~`gale-rdp`：IronRDP → 同一桌面视图管线~~ ✅（`crates/gale-rdp`：IronRDP 0.17 + blocking I/O；TLS+CredSSP/NLA；BGRA 帧；键鼠经 `ironrdp-input`；桌面 `rdp://user@host` / 主机卡开 Tab；钥匙串 `rdp://…`；Docker xrdp `127.0.0.1:3389` 探针已出帧；workspace `[patch]` 对齐 `ironrdp-connector` 的 picky/sspi 以与 `russh` 共存，见 `vendor/ironrdp-connector` / [IronRDP#1363](https://github.com/Devolutions/IronRDP/issues/1363)）  
    - **后续（RDP）**：证书校验弹窗（现 MVP 接受任意 TLS 证书）、网关、驱动器/剪贴板重定向、音频  
-3. 经 SSH 隧道 / ProxyJump 一键连远程桌面  
-4. 剪贴板、全屏、缩放、重连  
+3. ~~经 SSH 隧道 / ProxyJump 一键连远程桌面~~ ✅（`gale_ssh::open_local_tunnel`：跳板 SSH 含其 ProxyJump 链 → `127.0.0.1:ephemeral` LocalForward；VNC/RDP `dial` 走隧道，逻辑主机名仍用于钥匙串 / RDP SNI；桌面读会话 `jump_session_id`；Docker `2222→ssh` + `3389→rdp` 经隧道出帧实测）  
+4. 剪贴板 / 全屏 / 缩放 / 重连  
+   - ~~文本剪贴板~~ ✅（VNC：`ServerCutText` → 系统剪贴板；⌘V/`Paste` → `ClientCutText` + Ctrl+V。RDP：⌘V 按 US-QWERTY scancode 逐字键入（xrdp 常忽略 Unicode）；完整 CLIPRDR 双向仍待做）  
+   - **待做**：缩放 / 全屏适配、断线重连、RDP CLIPRDR 通道  
+
 
 详细见 [`docs/ROADMAP.md`](docs/ROADMAP.md)「Phase 3.5」。
 

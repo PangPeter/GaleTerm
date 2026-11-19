@@ -42,6 +42,8 @@ pub struct VncClientConfig {
     pub prompt: Option<Arc<dyn VncPrompt>>,
     /// Shared desktop (true) vs exclusive (false).
     pub shared: bool,
+    /// Dial this endpoint instead of `host:port` (SSH local tunnel).
+    pub dial: Option<(String, u16)>,
 }
 
 impl VncClientConfig {
@@ -52,6 +54,7 @@ impl VncClientConfig {
             password: None,
             prompt: None,
             shared: true,
+            dial: None,
         }
     }
 
@@ -67,12 +70,24 @@ impl VncClientConfig {
             password: vnc.password.clone(),
             prompt: None,
             shared: true,
+            dial: None,
         }
     }
 
     pub fn with_prompt(mut self, prompt: Arc<dyn VncPrompt>) -> Self {
         self.prompt = Some(prompt);
         self
+    }
+
+    pub fn with_dial(mut self, host: impl Into<String>, port: u16) -> Self {
+        self.dial = Some((host.into(), port));
+        self
+    }
+
+    fn dial_addr(&self) -> (String, u16) {
+        self.dial
+            .clone()
+            .unwrap_or_else(|| (self.host.clone(), self.port))
     }
 }
 
@@ -129,7 +144,8 @@ struct Conn {
 
 impl Conn {
     async fn connect(config: &VncClientConfig) -> Result<Self> {
-        let addr = format!("{}:{}", config.host, config.port);
+        let (dial_host, dial_port) = config.dial_addr();
+        let addr = format!("{dial_host}:{dial_port}");
         let mut stream = TcpStream::connect(&addr).await?;
         stream.set_nodelay(true)?;
 

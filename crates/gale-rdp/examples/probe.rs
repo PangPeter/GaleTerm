@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
         prompt: Some(Arc::new(EnvPrompt)),
         width: 1024,
         height: 768,
+        dial: None,
     };
 
     let (input_tx, input_rx) = mpsc::unbounded_channel();

@@ -47,6 +47,9 @@ pub struct RdpClientConfig {
     pub prompt: Option<Arc<dyn RdpPrompt>>,
     pub width: u16,
     pub height: u16,
+    /// Dial this endpoint instead of `host:port` (SSH local tunnel).
+    /// TLS / CredSSP still use `host` as the logical server name.
+    pub dial: Option<(String, u16)>,
 }
 
 impl RdpClientConfig {
@@ -65,6 +68,7 @@ impl RdpClientConfig {
             prompt: None,
             width: 1280,
             height: 800,
+            dial: None,
         }
     }
 
@@ -73,8 +77,19 @@ impl RdpClientConfig {
         self
     }
 
+    pub fn with_dial(mut self, host: impl Into<String>, port: u16) -> Self {
+        self.dial = Some((host.into(), port));
+        self
+    }
+
     fn credential_key(&self) -> CredentialKey {
         CredentialKey::password("rdp", &self.username, &self.host, self.port)
+    }
+
+    fn dial_addr(&self) -> (String, u16) {
+        self.dial
+            .clone()
+            .unwrap_or_else(|| (self.host.clone(), self.port))
     }
 }
 
@@ -135,7 +150,8 @@ impl RdpSession {
     pub fn connect(config: RdpClientConfig) -> Result<Self> {
         let password = resolve_password(&config)?;
         let connector_config = build_connector_config(&config, password.clone());
-        match connect_inner(connector_config, &config.host, config.port) {
+        let (dial_host, dial_port) = config.dial_addr();
+        match connect_inner(connector_config, &config.host, &dial_host, dial_port) {
             Ok((connection, framed)) => {
                 if let Some(prompt) = &config.prompt {
                     prompt.credential_result(&config.credential_key(), &password, true);
@@ -195,6 +211,28 @@ impl RdpSession {
             while let Ok(input) = input_rx.try_recv() {
                 match input {
                     RdpInput::Close => return Ok(()),
+                    RdpInput::CutText(text) => {
+                        // One character per FastPath PDU + a short gap so xrdp
+                        // (and similar) can process scancodes instead of dropping
+                        // a Unicode/scancode burst.
+                        for ch in text.chars() {
+                            let events = mapper.map_paste_char(ch);
+                            if events.is_empty() {
+                                continue;
+                            }
+                            let outputs = active_stage
+                                .process_fastpath_input(&mut image, &events)
+                                .map_err(|e| anyhow::anyhow!("paste input: {e}"))?;
+                            handle_outputs(
+                                &mut self.framed,
+                                &mut image,
+                                &output_tx,
+                                outputs,
+                                false,
+                            )?;
+                            std::thread::sleep(Duration::from_millis(8));
+                        }
+                    }
                     other => {
                         let events = mapper.map(&other);
                         if events.is_empty() {
@@ -345,17 +383,21 @@ fn build_connector_config(config: &RdpClientConfig, password: String) -> connect
     }
 }
 
+/// `server_name` is the logical host for TLS SNI / CredSSP; dial uses `dial_*`.
 fn connect_inner(
     config: connector::Config,
-    host: &str,
-    port: u16,
+    server_name: &str,
+    dial_host: &str,
+    dial_port: u16,
 ) -> Result<(ConnectionResult, UpgradedFramed)> {
-    let addr = (host, port)
+    let addr = (dial_host, dial_port)
         .to_socket_addrs()
         .map_err(Error::Io)?
         .next()
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("no address for {host}:{port}")))?;
-    debug!(%addr, "RDP TCP connect");
+        .ok_or_else(|| {
+            Error::Other(anyhow::anyhow!("no address for {dial_host}:{dial_port}"))
+        })?;
+    debug!(%addr, server = %server_name, "RDP TCP connect");
     let tcp = TcpStream::connect(addr).map_err(Error::Io)?;
     tcp.set_nodelay(true).ok();
     tcp.set_read_timeout(Some(Duration::from_secs(15)))
@@ -368,7 +410,8 @@ fn connect_inner(
         .map_err(|e| Error::Other(anyhow::anyhow!("connect begin: {e}")))?;
 
     let initial = framed.into_inner_no_leftover();
-    let (tls_stream, server_public_key) = tls::upgrade(initial, host)
+    // Logical hostname for SNI / CredSSP even when dialing a local tunnel.
+    let (tls_stream, server_public_key) = tls::upgrade(initial, server_name)
         .map_err(|e| Error::Other(anyhow::anyhow!("TLS upgrade: {e:#}")))?;
     let upgraded = ironrdp_blocking::mark_as_upgraded(should_upgrade, &mut connector);
     let mut upgraded_framed = ironrdp_blocking::Framed::new(tls_stream);
@@ -379,7 +422,7 @@ fn connect_inner(
         connector,
         &mut upgraded_framed,
         &mut network_client,
-        host.to_owned().into(),
+        server_name.to_owned().into(),
         server_public_key,
         None,
     )

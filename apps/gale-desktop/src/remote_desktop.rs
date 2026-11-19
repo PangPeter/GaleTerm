@@ -4,14 +4,22 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use gale_core::vault::CredentialKey;
-use gale_core::{Protocol, SessionProfile, SessionStore};
+use gale_core::{Protocol, SessionId, SessionProfile, SessionStore};
 use gale_desktop_view::{DesktopInput, DesktopPane, DesktopPaneEvent, FrameBuffer};
 use gale_rdp::{RdpClientConfig, RdpInput, RdpOutput, RdpPrompt, RdpSession};
+use gale_ssh::{open_local_tunnel, LocalTunnel};
 use gale_vnc::{VncClientConfig, VncInput, VncOutput, VncPrompt, VncSession};
 use gpui_kit::*;
 use tokio::sync::mpsc;
 
-use crate::remote_session::{runtime, GuiPrompts};
+fn write_clipboard(cx: &mut App, text: String) {
+    if text.is_empty() || text.starts_with("error:") {
+        return;
+    }
+    cx.write_to_clipboard(ClipboardItem::new_string(text));
+}
+
+use crate::remote_session::{runtime, ssh_config, GuiPrompts};
 
 impl VncPrompt for GuiPrompts {
     fn ask_password(&self, prompt: &str) -> Option<String> {
@@ -83,18 +91,13 @@ impl RemoteDesktopTab {
     ) -> anyhow::Result<Self> {
         let store = SessionStore::open_default().ok();
         let mut config = VncClientConfig::from_profile(&profile)?;
-        if let Some(jump) = profile
+        let jump = profile
             .vnc
             .as_ref()
-            .and_then(|v| v.jump_session_id.as_ref())
-        {
-            let _ = store;
-            anyhow::bail!(
-                "VNC via SSH jump (`{}`) is not implemented yet",
-                jump.as_str()
-            );
-        }
-        config = config.with_prompt(Arc::new(prompts));
+            .and_then(|v| v.jump_session_id.clone());
+        let dest_host = config.host.clone();
+        let dest_port = config.port;
+        config = config.with_prompt(Arc::new(prompts.clone()));
 
         let pane = cx.new(|cx| DesktopPane::new(format!("vnc-pane-{}", profile.id.as_str()), cx));
         let (input_tx, input_rx) = mpsc::unbounded_channel();
@@ -102,7 +105,22 @@ impl RemoteDesktopTab {
         let label = profile.name.clone();
 
         runtime().spawn(async move {
+            // Tunnel must live on this task (not the UI thread) so SSH password /
+            // host-key prompts can still reach the UI event loop.
             let result = async {
+                let _tunnel = open_jump_tunnel(
+                    jump.as_ref(),
+                    store.as_ref(),
+                    &prompts,
+                    &dest_host,
+                    dest_port,
+                )
+                .await?;
+                let config = if let Some(ref tunnel) = _tunnel {
+                    config.with_dial("127.0.0.1", tunnel.local_port())
+                } else {
+                    config
+                };
                 let session = VncSession::connect(config)
                     .await
                     .with_context(|| format!("connecting to {label}"))?;
@@ -118,7 +136,23 @@ impl RemoteDesktopTab {
         let pane_input = input_tx.clone();
         cx.subscribe(&pane, move |_, ev: &DesktopPaneEvent, _| {
             let DesktopPaneEvent::Input(input) = ev;
-            let _ = pane_input.send(to_vnc_input(input));
+            match input {
+                DesktopInput::CutText(text) => {
+                    // Update remote cut buffer, then Ctrl+V so the focused app pastes.
+                    let _ = pane_input.send(VncInput::CutText(text.clone()));
+                    for (down, keysym) in [
+                        (true, 0xffe3_u32),  // Control_L
+                        (true, 0x0076),      // v
+                        (false, 0x0076),
+                        (false, 0xffe3),
+                    ] {
+                        let _ = pane_input.send(VncInput::Key { down, keysym });
+                    }
+                }
+                other => {
+                    let _ = pane_input.send(to_vnc_input(other));
+                }
+            }
         })
         .detach();
 
@@ -139,7 +173,7 @@ impl RemoteDesktopTab {
                         VncOutput::CutText(text) if text.starts_with("error:") => {
                             pane.set_status(text.trim_start_matches("error:").to_string(), cx);
                         }
-                        VncOutput::CutText(_) => {}
+                        VncOutput::CutText(text) => write_clipboard(cx, text),
                     });
                     if alive.is_err() {
                         return;
@@ -164,34 +198,60 @@ impl RemoteDesktopTab {
     ) -> anyhow::Result<Self> {
         let store = SessionStore::open_default().ok();
         let mut config = RdpClientConfig::from_profile(&profile)?;
-        if let Some(jump) = profile
+        let jump = profile
             .rdp
             .as_ref()
-            .and_then(|v| v.jump_session_id.as_ref())
-        {
-            let _ = store;
-            anyhow::bail!(
-                "RDP via SSH jump (`{}`) is not implemented yet",
-                jump.as_str()
-            );
-        }
-        config = config.with_prompt(Arc::new(prompts));
+            .and_then(|v| v.jump_session_id.clone());
+        let dest_host = config.host.clone();
+        let dest_port = config.port;
+        config = config.with_prompt(Arc::new(prompts.clone()));
 
         let pane = cx.new(|cx| DesktopPane::new(format!("rdp-pane-{}", profile.id.as_str()), cx));
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         let (output_tx, mut output_rx) = mpsc::unbounded_channel::<RdpOutput>();
         let label = profile.name.clone();
 
-        // IronRDP blocking I/O — keep it off the UI / async workers.
-        runtime().spawn_blocking(move || {
-            let result = (|| {
+        runtime().spawn(async move {
+            let tunnel = match open_jump_tunnel(
+                jump.as_ref(),
+                store.as_ref(),
+                &prompts,
+                &dest_host,
+                dest_port,
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(err) => {
+                    let _ = output_tx.send(RdpOutput::CutText(format!("error:{err:#}")));
+                    return;
+                }
+            };
+            let config = if let Some(ref tunnel) = tunnel {
+                config.with_dial("127.0.0.1", tunnel.local_port())
+            } else {
+                config
+            };
+
+            let out = output_tx.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                // Keep `_tunnel` moved into this closure so it outlives IronRDP.
+                let _tunnel = tunnel;
                 let session =
                     RdpSession::connect(config).with_context(|| format!("connecting to {label}"))?;
-                session.run(input_rx, output_tx.clone())?;
+                session.run(input_rx, out.clone())?;
                 Ok::<(), anyhow::Error>(())
-            })();
-            if let Err(err) = result {
-                let _ = output_tx.send(RdpOutput::CutText(format!("error:{err:#}")));
+            })
+            .await;
+
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    let _ = output_tx.send(RdpOutput::CutText(format!("error:{err:#}")));
+                }
+                Err(err) => {
+                    let _ = output_tx.send(RdpOutput::CutText(format!("error:{err}")));
+                }
             }
         });
 
@@ -216,7 +276,7 @@ impl RemoteDesktopTab {
                         RdpOutput::CutText(text) if text.starts_with("error:") => {
                             pane.set_status(text.trim_start_matches("error:").to_string(), cx);
                         }
-                        RdpOutput::CutText(_) => {}
+                        RdpOutput::CutText(text) => write_clipboard(cx, text),
                     });
                     if alive.is_err() {
                         return;
@@ -244,6 +304,42 @@ impl Drop for RemoteDesktopTab {
             }
         }
     }
+}
+
+/// Resolve `jump_session_id` → SSH config (with its own ProxyJump chain) and
+/// open a local forward to `dest_host:dest_port`.
+async fn open_jump_tunnel(
+    jump: Option<&SessionId>,
+    store: Option<&SessionStore>,
+    prompts: &GuiPrompts,
+    dest_host: &str,
+    dest_port: u16,
+) -> anyhow::Result<Option<LocalTunnel>> {
+    let Some(jump_id) = jump else {
+        return Ok(None);
+    };
+    let store = store.context("SSH jump requires a session store")?;
+    let jump_profile = store
+        .get(jump_id.as_str())
+        .cloned()
+        .with_context(|| format!("jump session `{}` not found", jump_id.as_str()))?;
+    if jump_profile.protocol != Protocol::Ssh {
+        anyhow::bail!(
+            "jump session `{}` must be SSH (got {})",
+            jump_id.as_str(),
+            jump_profile.protocol.as_str()
+        );
+    }
+    let ssh_cfg = ssh_config(&jump_profile, Some(store), prompts)?;
+    let tunnel = open_local_tunnel(ssh_cfg, dest_host, dest_port)
+        .await
+        .with_context(|| {
+            format!(
+                "SSH tunnel via `{}` to {dest_host}:{dest_port}",
+                jump_profile.name
+            )
+        })?;
+    Ok(Some(tunnel))
 }
 
 fn to_vnc_input(input: &DesktopInput) -> VncInput {

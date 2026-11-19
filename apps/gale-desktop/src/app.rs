@@ -605,6 +605,16 @@ impl GaleApp {
         }
     }
 
+    fn paste_into_desktop(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.active_open_tab() else {
+            return;
+        };
+        let TabContent::Desktop(pane) = &tab.content else {
+            return;
+        };
+        pane.update(cx, |pane, cx| pane.paste_clipboard(cx));
+    }
+
     fn on_close_tab(&mut self, _: &menus::CloseTab, window: &mut Window, cx: &mut Context<Self>) {
         if self.palette.open {
             self.close_palette(window, cx);
@@ -1737,8 +1747,12 @@ impl GaleApp {
 
         div()
             .id("terminal-stage")
-            .key_context(menus::TERMINAL_CONTEXT)
-            .track_focus(&self.term_focus)
+            .key_context(if is_desktop {
+                menus::DESKTOP_CONTEXT
+            } else {
+                menus::TERMINAL_CONTEXT
+            })
+            .when(!is_desktop, |s| s.track_focus(&self.term_focus))
             .size_full()
             .bg(bg)
             .when(!is_desktop, |s| {
@@ -1749,6 +1763,9 @@ impl GaleApp {
                         MouseButton::Left,
                         cx.listener(|this, _, window, cx| window.focus(&this.term_focus, cx)),
                     )
+            })
+            .when(is_desktop, |s| {
+                s.on_action(cx.listener(|this, _: &Paste, _, cx| this.paste_into_desktop(cx)))
             })
             .map(|s| match content {
                 Some(pane) => s.child(pane),

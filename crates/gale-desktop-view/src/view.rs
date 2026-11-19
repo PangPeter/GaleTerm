@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::input::Paste;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use image::{Frame, RgbaImage};
@@ -73,6 +74,17 @@ impl DesktopPane {
             self.image = Some(image);
         }
         cx.notify();
+    }
+
+    /// Push local clipboard text to the remote session (ClientCutText / RDP paste).
+    pub fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        self.emit_input(DesktopInput::CutText(text), cx);
     }
 
     fn emit_input(&mut self, input: DesktopInput, cx: &mut Context<Self>) {
@@ -178,6 +190,10 @@ impl DesktopPane {
     }
 
     fn on_key(&mut self, ev: &KeyDownEvent, cx: &mut Context<Self>) {
+        // ⌘/Ctrl+C/V are handled as clipboard actions, not remote keystrokes.
+        if is_clipboard_chord(&ev.keystroke) {
+            return;
+        }
         let Some(keysym) = keysym_from_keystroke(&ev.keystroke) else {
             return;
         };
@@ -199,6 +215,18 @@ fn is_modifier(key: &str) -> bool {
         key.to_ascii_lowercase().as_str(),
         "shift" | "control" | "ctrl" | "alt" | "option" | "meta" | "cmd" | "super" | "win"
     )
+}
+
+fn is_clipboard_chord(keystroke: &Keystroke) -> bool {
+    let key = keystroke.key.to_ascii_lowercase();
+    if key != "c" && key != "v" {
+        return false;
+    }
+    if cfg!(target_os = "macos") {
+        keystroke.modifiers.platform
+    } else {
+        keystroke.modifiers.control && keystroke.modifiers.shift
+    }
 }
 
 fn button_mask(button: MouseButton) -> u8 {
@@ -233,11 +261,13 @@ impl Render for DesktopPane {
 
         div()
             .id(self.id.clone())
+            .key_context("GaleDesktop")
             .track_focus(&self.focus)
             .size_full()
             .bg(theme.background)
             .overflow_hidden()
             .cursor(CursorStyle::Arrow)
+            .on_action(cx.listener(|this, _: &Paste, _, cx| this.paste_clipboard(cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.on_key(ev, cx)))
             .on_key_up(cx.listener(|this, ev: &KeyUpEvent, _, cx| this.on_key_up(ev, cx)))
             .on_mouse_down(

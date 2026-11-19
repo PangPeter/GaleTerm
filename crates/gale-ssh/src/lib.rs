@@ -13,7 +13,8 @@ pub use agent::connect_agent;
 pub use client::{SecretPrompt, SshSession, SshSessionConfig};
 pub use error::{Error, Result};
 pub use forward::{
-    parse_bind_addr, parse_host_port, run_forward, ForwardMode, ForwardSpec,
+    open_local_tunnel, parse_bind_addr, parse_host_port, run_forward, ForwardMode, ForwardSpec,
+    LocalTunnel,
 };
 pub use gale_core::{ProxyConfig, ProxyKind};
 pub use host_key::{

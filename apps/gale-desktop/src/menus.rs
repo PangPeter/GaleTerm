@@ -28,6 +28,9 @@ actions!(
 /// Key context of the terminal stage (bindings that only apply there).
 pub const TERMINAL_CONTEXT: &str = "GaleTerminal";
 
+/// Key context of a remote-desktop pane (VNC / RDP).
+pub const DESKTOP_CONTEXT: &str = "GaleDesktop";
+
 /// Primary chord: `cmd-…` on macOS, `ctrl-shift-…` elsewhere so plain
 /// `ctrl-…` keeps reaching the shell.
 #[cfg(target_os = "macos")]
@@ -56,6 +59,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-shift-tab", PrevTab, None),
         KeyBinding::new(primary!("v"), Paste, Some(TERMINAL_CONTEXT)),
         KeyBinding::new(primary!("c"), Copy, Some(TERMINAL_CONTEXT)),
+        KeyBinding::new(primary!("v"), Paste, Some(DESKTOP_CONTEXT)),
+        KeyBinding::new(primary!("c"), Copy, Some(DESKTOP_CONTEXT)),
     ]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([

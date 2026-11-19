@@ -7,7 +7,8 @@ use russh::client::Msg;
 use russh::{Channel, ChannelMsg};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 
 use crate::client::{connect_authenticated, IncomingRemoteForward, SshSessionConfig};
 use crate::error::{Error, Result};
@@ -68,6 +69,89 @@ pub async fn run_forward(config: SshSessionConfig, spec: ForwardSpec) -> Result<
         ForwardMode::Remote => run_remote(config, spec).await,
         ForwardMode::Dynamic => run_dynamic(config, spec).await,
     }
+}
+
+/// Programmatic local forward for embedding (VNC/RDP jump tunnels).
+///
+/// Binds `127.0.0.1:0`, opens SSH (with ProxyJump hops), and relays each
+/// accepted TCP connection via `direct-tcpip` to `dest_host:dest_port` as seen
+/// from the final SSH hop. Drop the returned value to tear everything down.
+pub struct LocalTunnel {
+    local_addr: SocketAddr,
+    shutdown: Option<oneshot::Sender<()>>,
+    task: JoinHandle<()>,
+}
+
+impl LocalTunnel {
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    pub fn local_port(&self) -> u16 {
+        self.local_addr.port()
+    }
+}
+
+impl Drop for LocalTunnel {
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(());
+        }
+        self.task.abort();
+    }
+}
+
+/// Open an ephemeral local forward to `dest_host:dest_port` through `config`.
+pub async fn open_local_tunnel(
+    config: SshSessionConfig,
+    dest_host: impl Into<String>,
+    dest_port: u16,
+) -> Result<LocalTunnel> {
+    let dest_host = dest_host.into();
+    let (handle, jumps) = connect_authenticated(config, None).await?;
+    let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .await
+        .map_err(|e| Error::Ssh(format!("failed to bind local tunnel: {e}")))?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(|e| Error::Ssh(format!("local tunnel addr: {e}")))?;
+    tracing::info!(
+        %local_addr,
+        dest = %format!("{dest_host}:{dest_port}"),
+        "SSH local tunnel ready"
+    );
+
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
+    let task = tokio::spawn(async move {
+        // Keep jump handles alive for the tunneled direct-tcpip channels.
+        let _jumps = jumps;
+        loop {
+            tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => {
+                    let Ok((socket, peer)) = accepted else { break };
+                    match open_direct(&handle, &dest_host, dest_port, peer).await {
+                        Ok(channel) => {
+                            tokio::spawn(async move {
+                                let mut socket = socket;
+                                if let Err(e) = pump_tcp_and_channel(&mut socket, channel).await {
+                                    tracing::debug!("local tunnel connection closed: {e}");
+                                }
+                            });
+                        }
+                        Err(e) => tracing::warn!("local tunnel open failed: {e}"),
+                    }
+                }
+            }
+        }
+        // Dropping `handle` closes the SSH session.
+    });
+
+    Ok(LocalTunnel {
+        local_addr,
+        shutdown: Some(shutdown_tx),
+        task,
+    })
 }
 
 async fn run_local(config: SshSessionConfig, spec: ForwardSpec) -> Result<()> {
