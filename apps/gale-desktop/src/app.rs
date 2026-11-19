@@ -346,7 +346,7 @@ impl GaleApp {
                 return;
             }
             Protocol::Rdp => {
-                self.notify_user(i18n::tr("app.remote_desktop_soon"), cx);
+                self.open_rdp(profile, window, cx);
                 return;
             }
             _ => {}
@@ -391,7 +391,21 @@ impl GaleApp {
         self.show_page(Page::Terminal, window, cx);
     }
 
+    fn open_rdp(&mut self, profile: SessionProfile, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_remote_desktop(profile, Protocol::Rdp, window, cx);
+    }
+
     fn open_vnc(&mut self, profile: SessionProfile, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_remote_desktop(profile, Protocol::Vnc, window, cx);
+    }
+
+    fn open_remote_desktop(
+        &mut self,
+        profile: SessionProfile,
+        protocol: Protocol,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
         let owner = cx.entity().downgrade();
@@ -418,7 +432,7 @@ impl GaleApp {
         self.tabs.push(OpenTab {
             id,
             title: SharedString::from(profile.name),
-            protocol: Protocol::Vnc,
+            protocol,
             content: TabContent::Desktop(tab.pane.clone()),
             backend: TabBackend::Desktop(tab),
             closed: false,

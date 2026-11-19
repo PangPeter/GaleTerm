@@ -1,0 +1,29 @@
+[package]
+name = "gale-rdp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RDP client for GaleTerm (Phase 3.5, IronRDP)"
+
+[dependencies]
+anyhow.workspace = true
+gale-core = { path = "../gale-core" }
+ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input"] }
+ironrdp-blocking = "0.10"
+ironrdp-input = "0.7"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+sspi = { version = "0.22", features = ["network_client"] }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+x509-cert = "0.2"
+
+[[example]]
+name = "probe"
+path = "examples/probe.rs"
+
+[dev-dependencies]
+anyhow.workspace = true
+
+[lints]
+workspace = true

@@ -62,8 +62,8 @@ app:
     en: This section is being built. Hosts and local terminals already work.
     zh-CN: 该页面正在开发中，主机列表与本地终端已可用。
   remote_desktop_soon:
-    en: "RDP tabs land later in Phase 3.5. VNC already works — try vnc://host[:port]."
-    zh-CN: "RDP 仍在 Phase 3.5 后续实现。VNC 已可用，可试 vnc://host[:port]。"
+    en: "Remote desktop is available — try vnc://host[:port] or rdp://user@host[:port]."
+    zh-CN: "远程桌面已可用，可试 vnc://host[:port] 或 rdp://user@host[:port]。"
   remote_todo:
     en: Adding hosts in the app is coming soon — use `gale add` for now
     zh-CN: 应用内新建主机即将上线，目前请用 `gale add`

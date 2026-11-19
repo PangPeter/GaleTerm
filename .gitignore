@@ -6,6 +6,7 @@
 *.swp
 .env
 .env.*
+tmp-ironrdp-probe/
 apps/gale-desktop/node_modules/
 apps/gale-desktop/dist/
 apps/gale-desktop/src-tauri/target/

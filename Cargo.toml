@@ -8,6 +8,7 @@ members = [
     "crates/gale-serial",
     "crates/gale-ftp",
     "crates/gale-vnc",
+    "crates/gale-rdp",
     "crates/gale-cli",
     "crates/gale-term-view",
     "crates/gale-desktop-view",
@@ -43,3 +44,10 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# IronRDP 0.17 pins picky 7.0.0-rc.25 (curve25519-dalek pre/rc), which conflicts
+# with russh 0.65 (^5 → stable 5.0.0). Bump connector to picky rc.26 + sspi 0.22
+# (compatible with russh; sspi 0.23 breaks KerberosConfig fields).
+# Track: https://github.com/Devolutions/IronRDP/issues/1363
+[patch.crates-io]
+ironrdp-connector = { path = "vendor/ironrdp-connector" }

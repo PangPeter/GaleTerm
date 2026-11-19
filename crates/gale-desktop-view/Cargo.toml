@@ -6,7 +6,6 @@ license.workspace = true
 description = "gpui remote-desktop view for GaleTerm (VNC / RDP frames)"
 
 [dependencies]
-gale-vnc = { path = "../gale-vnc" }
 gpui-kit.workspace = true
 image = { version = "0.25", default-features = false }
 smallvec = "1"

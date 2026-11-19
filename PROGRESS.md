@@ -4,8 +4,9 @@
 
 **项目路径**：`/Users/makerv/myDisk/xgs_project/gale-term`  
 **目标**：Rust 跨平台通用终端 / SSH 客户端，功能面囊括 WindTerm（非源码 1:1）  
-**当前阶段**：Phase 3.5 进行中 — VNC MVP 已可连；下一步 RDP（IronRDP）与 SSH 隧道  
+**当前阶段**：Phase 3.5 进行中 — VNC / RDP MVP 已可连；下一步 SSH 隧道与剪贴板/缩放  
 **本地 VNC 测试**：`docker start gale-vnc-test`（`127.0.0.1:5901`，密码 `secret`）；停用 `docker rm -f gale-vnc-test`  
+**本地 RDP 测试**：`docker start gale-rdp-test`（`127.0.0.1:3389`，账号 `ubuntu`/`ubuntu`，镜像 `danielguerra/ubuntu-xrdp`；探针 `cargo run -p gale-rdp --example probe -- 127.0.0.1 3389 ubuntu ubuntu`）  
 **测试机**：`makerv@192.168.55.3`（Ubuntu，OpenSSH 9.6，仅密码登录）可用于远程联调  
 **更新日期**：2026-11-19
 
@@ -99,13 +100,14 @@ Phase 2 可选长尾（不阻塞 Phase 3）：ProxyCommand、ControlMaster、ZMo
     - **后续**：CLI 读取已保存凭据；代理（HTTP/SOCKS5）密码进钥匙串；`sessions.json` 里历史明文 `password` 字段迁移  
 12. ~~会话模型完善~~ ✅  
     - ~~`Protocol::Ftp`~~ ✅（`FtpConfig`/`FtpSecurity`；CLI `gale add --protocol ftp|ftps`）  
-    - ~~`Protocol::Rdp` / `Protocol::Vnc`~~ ✅（`RdpConfig`/`VncConfig`：host/port/凭据字段 + 可选 `jump_session_id` 走 SSH 隧道；`gale add --protocol rdp|vnc`；桌面 `rdp://`/`vnc://` 快速连接与主机卡片；点开提示 Phase 3.5）
+    - ~~`Protocol::Rdp` / `Protocol::Vnc`~~ ✅（`RdpConfig`/`VncConfig`：host/port/凭据字段 + 可选 `jump_session_id` 走 SSH 隧道；`gale add --protocol rdp|vnc`；桌面 `rdp://`/`vnc://` 快速连接与主机卡片）
 
 ### 紧随：Phase 3.5（RDP / VNC）
 
 1. ~~`gale-vnc`：RFB MVP → gpui 帧显示 + 键鼠~~ ✅（`crates/gale-vnc`：RFB 3.8、VNC DES 密码认证、Raw/CopyRect、BGRA 帧缓冲；`crates/gale-desktop-view` 绘制 + 键鼠；桌面 `vnc://` / 主机卡开 Tab；钥匙串复用；Docker `dorowu/ubuntu-desktop-lxde-vnc` 于 `127.0.0.1:5901` 实测握手与出帧）  
    - **后续（VNC）**：ZRLE/Tight、本地光标、剪贴板双向、缩放/全屏、SSH `jump_session_id` 隧道  
-2. `gale-rdp`：倾向 IronRDP（Apache-2.0）→ 同一桌面视图管线  
+2. ~~`gale-rdp`：IronRDP → 同一桌面视图管线~~ ✅（`crates/gale-rdp`：IronRDP 0.17 + blocking I/O；TLS+CredSSP/NLA；BGRA 帧；键鼠经 `ironrdp-input`；桌面 `rdp://user@host` / 主机卡开 Tab；钥匙串 `rdp://…`；Docker xrdp `127.0.0.1:3389` 探针已出帧；workspace `[patch]` 对齐 `ironrdp-connector` 的 picky/sspi 以与 `russh` 共存，见 `vendor/ironrdp-connector` / [IronRDP#1363](https://github.com/Devolutions/IronRDP/issues/1363)）  
+   - **后续（RDP）**：证书校验弹窗（现 MVP 接受任意 TLS 证书）、网关、驱动器/剪贴板重定向、音频  
 3. 经 SSH 隧道 / ProxyJump 一键连远程桌面  
 4. 剪贴板、全屏、缩放、重连  
 
@@ -150,11 +152,14 @@ gale-term/
     gale-serial/     ← 串口
     gale-ftp/           ← FTP / FTPS
     gale-vnc/           ← VNC / RFB（Phase 3.5）
+    gale-rdp/           ← RDP（Phase 3.5，IronRDP）
     gale-term-view/     ← gpui 终端视图
     gale-desktop-view/  ← gpui 远程桌面视图（VNC/RDP）
     gale-cli/           ← 命令行 gale
   apps/
     gale-desktop/       ← gpui 桌面
+  vendor/
+    ironrdp-connector/  ← picky/sspi 对齐补丁（与 russh 共存）
   docs/
 ```
 
@@ -171,17 +176,18 @@ gale-term/
 | 桌面壳 | `gpui-kit = 0.10.0`；UI 基调 **Termius Night**（`docs/UI.md`）；终端视图自研；Zed `terminal_view` 为 GPL 不可复制 |
 | UI 语言 | `rust-i18n`；`en` / `zh-CN`；默认跟随系统，可手动；见 ARCHITECTURE「国际化」 |
 | FTP / FTPS（Phase 3） | 自研 `gale-ftp`（TLS 用 `tokio-rustls` + ring + `rustls-native-certs`）；双栏 UI 与 SFTP 共用 `files/backend.rs` 的 `Backend` |
-| RDP / VNC（Phase 3.5） | `gale-rdp`（倾向 IronRDP Apache-2.0）/ `gale-vnc`（RFB）；帧进自研 desktop-view；可经 SSH 隧道 |
+| RDP / VNC（Phase 3.5） | `gale-rdp`（IronRDP 0.17 Apache-2.0）/ `gale-vnc`（RFB）；帧进 `gale-desktop-view`；可经 SSH 隧道（待做） |
 | 平台目标 | Windows / macOS / Linux |
 | 安全约束 | workspace `unsafe_code = forbid` |
 
 ## 7. 远程桌面备忘（RDP / VNC）
 
 - **已写入方案**：是（ROADMAP Phase 3.5 + ARCHITECTURE crate 规划）
-- **尚未实现代码**：是
+- **实现状态**：VNC MVP + RDP MVP 均已接入桌面 Tab；SSH 隧道 / 剪贴板 / 缩放仍待做
 - **为何不放 Phase 2**：需要图形窗口；CLI 无法提供完整体验
 - **为何不阻塞 Phase 3 主线**：先把终端 Tab / 会话树跑通，再接帧缓冲视图
-- **许可**：只用 MIT/Apache；RDP 倾向 IronRDP；禁止 GPL 客户端核心
+- **许可**：只用 MIT/Apache；RDP 用 IronRDP；禁止 GPL 客户端核心
+- **依赖注意**：IronRDP 与 `russh` 的 `curve25519-dalek` 线冲突，workspace 用 `vendor/ironrdp-connector` patch
 
 ## 8. FTP / 双栏文件管理器备忘
 

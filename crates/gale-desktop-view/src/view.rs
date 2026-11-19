@@ -4,18 +4,18 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gale_vnc::{FrameBuffer, VncInput};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use image::{Frame, RgbaImage};
 use smallvec::smallvec;
 
+use crate::frame::{DesktopInput, FrameBuffer};
 use crate::keysym::keysym_from_keystroke;
 
 #[derive(Clone, Debug)]
 pub enum DesktopPaneEvent {
-    Input(VncInput),
+    Input(DesktopInput),
 }
 
 pub struct DesktopPane {
@@ -75,7 +75,7 @@ impl DesktopPane {
         cx.notify();
     }
 
-    fn emit_input(&mut self, input: VncInput, cx: &mut Context<Self>) {
+    fn emit_input(&mut self, input: DesktopInput, cx: &mut Context<Self>) {
         cx.emit(DesktopPaneEvent::Input(input));
     }
 
@@ -109,7 +109,7 @@ impl DesktopPane {
         };
         self.buttons |= button_mask(ev.button);
         self.emit_input(
-            VncInput::Pointer {
+            DesktopInput::Pointer {
                 x,
                 y,
                 buttons: self.buttons,
@@ -124,7 +124,7 @@ impl DesktopPane {
         };
         self.buttons &= !button_mask(ev.button);
         self.emit_input(
-            VncInput::Pointer {
+            DesktopInput::Pointer {
                 x,
                 y,
                 buttons: self.buttons,
@@ -138,7 +138,7 @@ impl DesktopPane {
             return;
         };
         self.emit_input(
-            VncInput::Pointer {
+            DesktopInput::Pointer {
                 x,
                 y,
                 buttons: self.buttons,
@@ -160,7 +160,7 @@ impl DesktopPane {
             return;
         };
         self.emit_input(
-            VncInput::Pointer {
+            DesktopInput::Pointer {
                 x,
                 y,
                 buttons: self.buttons | wheel,
@@ -168,7 +168,7 @@ impl DesktopPane {
             cx,
         );
         self.emit_input(
-            VncInput::Pointer {
+            DesktopInput::Pointer {
                 x,
                 y,
                 buttons: self.buttons,
@@ -181,15 +181,15 @@ impl DesktopPane {
         let Some(keysym) = keysym_from_keystroke(&ev.keystroke) else {
             return;
         };
-        self.emit_input(VncInput::Key { down: true, keysym }, cx);
+        self.emit_input(DesktopInput::Key { down: true, keysym }, cx);
         if !is_modifier(&ev.keystroke.key) {
-            self.emit_input(VncInput::Key { down: false, keysym }, cx);
+            self.emit_input(DesktopInput::Key { down: false, keysym }, cx);
         }
     }
 
     fn on_key_up(&mut self, ev: &KeyUpEvent, cx: &mut Context<Self>) {
         if let Some(keysym) = keysym_from_keystroke(&ev.keystroke) {
-            self.emit_input(VncInput::Key { down: false, keysym }, cx);
+            self.emit_input(DesktopInput::Key { down: false, keysym }, cx);
         }
     }
 }
