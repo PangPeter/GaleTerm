@@ -7,6 +7,7 @@ mod fonts;
 mod i18n;
 mod local_session;
 mod menus;
+mod remote_desktop;
 mod remote_session;
 mod theme;
 

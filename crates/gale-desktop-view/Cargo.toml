@@ -1,0 +1,16 @@
+[package]
+name = "gale-desktop-view"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "gpui remote-desktop view for GaleTerm (VNC / RDP frames)"
+
+[dependencies]
+gale-vnc = { path = "../gale-vnc" }
+gpui-kit.workspace = true
+image = { version = "0.25", default-features = false }
+smallvec = "1"
+tracing.workspace = true
+
+[lints]
+workspace = true

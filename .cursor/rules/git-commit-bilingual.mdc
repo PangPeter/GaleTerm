@@ -1,0 +1,45 @@
+---
+description: Git commit 消息必须中英双语
+alwaysApply: true
+---
+
+# Git Commit 双语规范
+
+本仓库所有 commit message 使用 **中文 + 英文** 双语，不要只用英文或只用中文。
+
+## 格式
+
+```
+<中文摘要，一句说清为何改>
+
+<English summary, one sentence focusing on why>
+```
+
+- 第一行：中文；空一行后：英文。
+- 中英文各自 1 句为主；必要时可各加 1–2 行补充，仍保持中英对应。
+- 聚焦 **why**，少堆文件清单；语气与仓库既有风格一致。
+- 用 HEREDOC 传入，避免转义问题。
+
+## 示例
+
+```
+重写 README 对齐 Phase 3，并补充 MIT LICENSE。
+
+Rewrite README for Phase 3 status and add MIT LICENSE.
+```
+
+```
+修复桌面终端 CJK 双宽字符错位。
+
+Fix CJK double-width glyph misalignment in the desktop terminal.
+```
+
+## 反例
+
+```
+# ❌ 纯英文
+Rewrite README for Phase 3 status and add MIT LICENSE.
+
+# ❌ 纯中文
+重写 README 对齐 Phase 3，并补充 MIT LICENSE。
+```

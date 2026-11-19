@@ -8,6 +8,7 @@ description = "Session model, config, and store for GaleTerm"
 [dependencies]
 chrono.workspace = true
 dirs.workspace = true
+keyring = "4.2"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

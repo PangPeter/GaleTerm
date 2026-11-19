@@ -34,7 +34,7 @@ enum Commands {
     Add {
         /// Session display name
         name: String,
-        /// Protocol: local | ssh | telnet | tcp | serial | ftp | ftps
+        /// Protocol: local | ssh | telnet | tcp | serial | ftp | ftps | vnc | rdp
         #[arg(long, default_value = "ssh")]
         protocol: String,
         #[arg(long)]
@@ -422,6 +422,27 @@ fn cmd_list() -> Result<()> {
                 .as_ref()
                 .map(|c| format!("{} @ {}", c.device, c.baud_rate))
                 .unwrap_or_default(),
+            Protocol::Ftp => s
+                .ftp
+                .as_ref()
+                .map(|c| format!("{}@{}:{}", c.username, c.host, c.port))
+                .unwrap_or_default(),
+            Protocol::Vnc => {
+                let base = s
+                    .vnc
+                    .as_ref()
+                    .map(|c| format!("{}:{}", c.host, c.port))
+                    .unwrap_or_default();
+                with_jump_label(&store, base, s.vnc.as_ref().and_then(|c| c.jump_session_id.as_ref()))
+            }
+            Protocol::Rdp => {
+                let base = s
+                    .rdp
+                    .as_ref()
+                    .map(|c| format!("{}@{}:{}", c.username, c.host, c.port))
+                    .unwrap_or_default();
+                with_jump_label(&store, base, s.rdp.as_ref().and_then(|c| c.jump_session_id.as_ref()))
+            }
             other => other.as_str().into(),
         };
         println!(
@@ -474,14 +495,8 @@ fn cmd_add(
                 },
             );
             if let Some(jump_ref) = jump {
-                let jump_profile = store.get(&jump_ref).with_context(|| {
-                    format!("jump session not found: {jump_ref}")
-                })?;
-                if jump_profile.protocol != Protocol::Ssh {
-                    bail!("jump session `{}` is not ssh", jump_ref);
-                }
                 profile.ssh.as_mut().unwrap().jump_session_id =
-                    Some(jump_profile.id.clone());
+                    Some(resolve_ssh_jump(&store, &jump_ref)?.id.clone());
             }
             if let Some(proxy_url) = proxy {
                 profile.ssh.as_mut().unwrap().proxy =
@@ -518,6 +533,25 @@ fn cmd_add(
             };
             let user = user.unwrap_or_else(|| "anonymous".into());
             SessionProfile::new_ftp(name, host, user, port.unwrap_or(21), security)
+        }
+        Protocol::Vnc => {
+            let host = host.context("--host is required for vnc sessions")?;
+            let mut profile = SessionProfile::new_vnc(name, host, port.unwrap_or(5900));
+            if let Some(jump_ref) = jump {
+                profile.vnc.as_mut().unwrap().jump_session_id =
+                    Some(resolve_ssh_jump(&store, &jump_ref)?.id.clone());
+            }
+            profile
+        }
+        Protocol::Rdp => {
+            let host = host.context("--host is required for rdp sessions")?;
+            let user = user.context("--user is required for rdp sessions")?;
+            let mut profile = SessionProfile::new_rdp(name, host, user, port.unwrap_or(3389));
+            if let Some(jump_ref) = jump {
+                profile.rdp.as_mut().unwrap().jump_session_id =
+                    Some(resolve_ssh_jump(&store, &jump_ref)?.id.clone());
+            }
+            profile
         }
     };
     profile.group = group;
@@ -934,6 +968,9 @@ async fn cmd_connect(
         }
         Protocol::Sftp => bail!("use `gale sftp` / `gale scp` with an ssh session"),
         Protocol::Ftp => bail!("ftp sessions are browsed in the desktop file manager"),
+        Protocol::Vnc | Protocol::Rdp => {
+            bail!("{} sessions open in the desktop app (Phase 3.5)", profile.protocol.as_str())
+        }
     }
 }
 
@@ -1126,6 +1163,33 @@ fn connect_local(cols: u16, rows: u16) -> Result<()> {
 
     let _ = writer_pty.join();
     Ok(())
+}
+
+fn resolve_ssh_jump<'a>(store: &'a SessionStore, jump_ref: &str) -> Result<&'a SessionProfile> {
+    let jump = store
+        .get(jump_ref)
+        .with_context(|| format!("jump session not found: {jump_ref}"))?;
+    if jump.protocol != Protocol::Ssh {
+        bail!("jump session `{jump_ref}` is not ssh");
+    }
+    Ok(jump)
+}
+
+fn with_jump_label(
+    store: &SessionStore,
+    base: String,
+    jump_id: Option<&gale_core::SessionId>,
+) -> String {
+    match jump_id {
+        Some(jid) => {
+            let name = store
+                .get(jid.as_str())
+                .map(|j| j.name.as_str())
+                .unwrap_or(jid.as_str());
+            format!("{base} via {name}")
+        }
+        None => base,
+    }
 }
 
 fn parse_auth(s: &str) -> Result<AuthMethod> {

@@ -15,12 +15,14 @@ chrono.workspace = true
 async-channel = "2"
 dirs.workspace = true
 gale-core = { path = "../../crates/gale-core" }
+gale-desktop-view = { path = "../../crates/gale-desktop-view" }
 gale-ftp = { path = "../../crates/gale-ftp" }
 gale-net = { path = "../../crates/gale-net" }
 gale-serial = { path = "../../crates/gale-serial" }
 gale-ssh = { path = "../../crates/gale-ssh" }
 gale-term = { path = "../../crates/gale-term" }
 gale-term-view = { path = "../../crates/gale-term-view" }
+gale-vnc = { path = "../../crates/gale-vnc" }
 gpui-kit.workspace = true
 rust-i18n = "4.2"
 serde = { workspace = true, features = ["derive"] }

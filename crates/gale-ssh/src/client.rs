@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gale_core::vault::CredentialKey;
 use gale_core::{AuthMethod, ProxyConfig, SessionInput, SessionProfile, SshConfig};
 use russh::client::{self, ChannelOpenHandle, Config, Handle, Msg};
 use russh::keys::{load_secret_key, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
@@ -21,6 +22,20 @@ use crate::proxy::dial_via_proxy;
 /// Called from the SSH task; implementations may block until the user answers.
 pub trait SecretPrompt: Send + Sync {
     fn ask_secret(&self, prompt: &str) -> Option<String>;
+
+    /// [`Self::ask_secret`] for a known credential, so the UI can offer to
+    /// remember the answer.
+    fn ask_credential(&self, _key: &CredentialKey, prompt: &str) -> Option<String> {
+        self.ask_secret(prompt)
+    }
+
+    /// A saved secret for `key`, tried once before asking.
+    fn saved_credential(&self, _key: &CredentialKey) -> Option<String> {
+        None
+    }
+
+    /// Whether `secret` for `key` was accepted, so it can be saved or forgotten.
+    fn credential_result(&self, _key: &CredentialKey, _secret: &str, _accepted: bool) {}
 }
 
 /// Password attempts when a [`SecretPrompt`] can ask again (OpenSSH default).
@@ -533,21 +548,52 @@ async fn authenticate_password(
     config: &SshSessionConfig,
 ) -> Result<bool> {
     let prompt = format!("{}@{}'s password: ", config.username, config.host);
+    let key = CredentialKey::password("ssh", &config.username, &config.host, config.port);
     if let Some(password) = &config.auth.password {
-        return try_password(handle, &config.username, password.clone()).await;
+        if try_password(handle, &config.username, password.clone()).await? {
+            return Ok(true);
+        }
+        if config.secret_prompt.is_none() {
+            return Ok(false);
+        }
     }
-    let attempts = if config.secret_prompt.is_some() {
-        PASSWORD_ATTEMPTS
-    } else {
-        1
+    let Some(secrets) = &config.secret_prompt else {
+        let password = prompt_secret(&prompt)?;
+        return try_password(handle, &config.username, password).await;
     };
-    for _ in 0..attempts {
-        let password = ask_secret(config, &prompt)?;
-        if try_password(handle, &config.username, password).await? {
+    if let Some(saved) = secrets.saved_credential(&key) {
+        let accepted = try_password(handle, &config.username, saved.clone()).await?;
+        secrets.credential_result(&key, &saved, accepted);
+        if accepted {
+            return Ok(true);
+        }
+    }
+    for _ in 0..PASSWORD_ATTEMPTS {
+        let password = secrets.ask_credential(&key, &prompt).ok_or(Error::Cancelled)?;
+        let accepted = try_password(handle, &config.username, password.clone()).await?;
+        secrets.credential_result(&key, &password, accepted);
+        if accepted {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+/// Decrypt `path`, trying a saved passphrase before asking.
+fn unlock_key(secrets: &dyn SecretPrompt, path: &PathBuf) -> Result<PrivateKey> {
+    let key = CredentialKey::passphrase(path);
+    if let Some(saved) = secrets.saved_credential(&key) {
+        let loaded = load_secret_key(path, Some(&saved));
+        secrets.credential_result(&key, &saved, loaded.is_ok());
+        if let Ok(private) = loaded {
+            return Ok(private);
+        }
+    }
+    let prompt = format!("Enter passphrase for key '{}': ", path.display());
+    let passphrase = secrets.ask_credential(&key, &prompt).ok_or(Error::Cancelled)?;
+    let loaded = load_key(path, Some(&passphrase));
+    secrets.credential_result(&key, &passphrase, loaded.is_ok());
+    loaded
 }
 
 async fn authenticate_publickey(
@@ -560,12 +606,8 @@ async fn authenticate_publickey(
         &config.secret_prompt,
     ) {
         (Ok(key), _) => key,
-        (Err(russh::keys::Error::KeyIsEncrypted), Some(_)) => {
-            let passphrase = ask_secret(
-                config,
-                &format!("Enter passphrase for key '{}': ", key_path.display()),
-            )?;
-            load_key(&key_path, Some(&passphrase))?
+        (Err(russh::keys::Error::KeyIsEncrypted), Some(secrets)) => {
+            unlock_key(secrets.as_ref(), &key_path)?
         }
         (Err(e), _) => return Err(Error::Ssh(e.to_string())),
     };
@@ -621,13 +663,6 @@ async fn try_password(handle: &mut Handle<Handler>, user: &str, password: String
         .await
         .map_err(|e| Error::Ssh(e.to_string()))?;
     Ok(result.success())
-}
-
-fn ask_secret(config: &SshSessionConfig, prompt: &str) -> Result<String> {
-    match &config.secret_prompt {
-        Some(p) => p.ask_secret(prompt).ok_or(Error::Cancelled),
-        None => prompt_secret(prompt),
-    }
 }
 
 fn prompt_secret(prompt: &str) -> Result<String> {

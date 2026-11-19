@@ -4,7 +4,8 @@
 
 **项目路径**：`/Users/makerv/myDisk/xgs_project/gale-term`  
 **目标**：Rust 跨平台通用终端 / SSH 客户端，功能面囊括 WindTerm（非源码 1:1）  
-**当前阶段**：Phase 3（Termius 风格壳 + 段色 + 桌面远程连接 + 菜单/命令面板）；下一步光标/选区复制/终端自适应尺寸、双栏文件管理器；RDP/VNC 在 Phase 3.5  
+**当前阶段**：Phase 3.5 进行中 — VNC MVP 已可连；下一步 RDP（IronRDP）与 SSH 隧道  
+**本地 VNC 测试**：`docker start gale-vnc-test`（`127.0.0.1:5901`，密码 `secret`）；停用 `docker rm -f gale-vnc-test`  
 **测试机**：`makerv@192.168.55.3`（Ubuntu，OpenSSH 9.6，仅密码登录）可用于远程联调  
 **更新日期**：2026-11-19
 
@@ -94,12 +95,16 @@ Phase 2 可选长尾（不阻塞 Phase 3）：ProxyCommand、ControlMaster、ZMo
     - ~~FTP / FTPS~~ ✅（`gale-ftp` 作为 `Backend::Ftp` 接入；`ftp://`、`ftps://`、`ftp user@host` 快速连接；明文 FTP 在远程栏标“未加密”；证书确认复用主机指纹弹窗）  
     - ~~交互增强~~ ✅（右键菜单：打开/上传下载/默认应用打开/访达显示/复制名称与路径/重命名/改权限/删除/新建文件与文件夹/全选/多选/隐藏文件/刷新；多选模式（复选框列 + 表头全选，Space 勾选、Esc 退出）；列头点击排序；栏内筛选；F2 重命名、⌘C 复制路径；文件图标用 VS Code Material Icon Theme（MIT，`scripts/vendor-file-icons.py` 抽取 860 个 SVG 到 `assets/file-icons`，`build.rs` 嵌入，`file_icons.rs` 按文件名→最长扩展名→默认匹配））  
     - **后续**：断点续传（REST / SFTP offset）；FTP 主动模式（PORT）；远程文件在线编辑（下载→外部编辑→回传）；栏内复制/剪切粘贴  
-11. 凭据保险箱（系统 keychain）  
-12. 会话模型完善 ~~`Protocol::Ftp`~~ ✅（`FtpConfig`/`FtpSecurity`；CLI `gale add --protocol ftp|ftps`）/ `Rdp` / `Vnc`
+11. ~~凭据保险箱（系统 keychain）~~ ✅（`gale-core::vault`：`keyring` 4 → macOS 钥匙串 / Windows 凭据管理器 / Linux Secret Service，服务名 `GaleTerm`，账户名 `ssh://user@host:port`、`ftp://…`、`key:/私钥路径`；`vault_index.json` 只记“存了哪些”，不含密钥。`SecretPrompt` / `FtpPrompt` 新增 `saved_credential` / `ask_credential` / `credential_result`：先试已保存的，被拒则标记失效并重新询问；密码框“记住”勾选后在认证成功时才写入；SSH 与 SFTP 共用同一条。Vault → 钥匙串页可查看与删除）  
+    - **后续**：CLI 读取已保存凭据；代理（HTTP/SOCKS5）密码进钥匙串；`sessions.json` 里历史明文 `password` 字段迁移  
+12. ~~会话模型完善~~ ✅  
+    - ~~`Protocol::Ftp`~~ ✅（`FtpConfig`/`FtpSecurity`；CLI `gale add --protocol ftp|ftps`）  
+    - ~~`Protocol::Rdp` / `Protocol::Vnc`~~ ✅（`RdpConfig`/`VncConfig`：host/port/凭据字段 + 可选 `jump_session_id` 走 SSH 隧道；`gale add --protocol rdp|vnc`；桌面 `rdp://`/`vnc://` 快速连接与主机卡片；点开提示 Phase 3.5）
 
 ### 紧随：Phase 3.5（RDP / VNC）
 
-1. `gale-vnc`：RFB MVP → gpui 帧显示 + 键鼠  
+1. ~~`gale-vnc`：RFB MVP → gpui 帧显示 + 键鼠~~ ✅（`crates/gale-vnc`：RFB 3.8、VNC DES 密码认证、Raw/CopyRect、BGRA 帧缓冲；`crates/gale-desktop-view` 绘制 + 键鼠；桌面 `vnc://` / 主机卡开 Tab；钥匙串复用；Docker `dorowu/ubuntu-desktop-lxde-vnc` 于 `127.0.0.1:5901` 实测握手与出帧）  
+   - **后续（VNC）**：ZRLE/Tight、本地光标、剪贴板双向、缩放/全屏、SSH `jump_session_id` 隧道  
 2. `gale-rdp`：倾向 IronRDP（Apache-2.0）→ 同一桌面视图管线  
 3. 经 SSH 隧道 / ProxyJump 一键连远程桌面  
 4. 剪贴板、全屏、缩放、重连  
@@ -143,11 +148,13 @@ gale-term/
     gale-ssh/        ← SSH + SFTP + SCP
     gale-net/        ← Telnet + Raw TCP
     gale-serial/     ← 串口
-    gale-ftp/        ← FTP / FTPS
-    gale-term-view/  ← gpui 终端视图（Phase 3）
-    gale-cli/        ← 命令行 gale
+    gale-ftp/           ← FTP / FTPS
+    gale-vnc/           ← VNC / RFB（Phase 3.5）
+    gale-term-view/     ← gpui 终端视图
+    gale-desktop-view/  ← gpui 远程桌面视图（VNC/RDP）
+    gale-cli/           ← 命令行 gale
   apps/
-    gale-desktop/    ← gpui 桌面（Phase 3）
+    gale-desktop/       ← gpui 桌面
   docs/
 ```
 

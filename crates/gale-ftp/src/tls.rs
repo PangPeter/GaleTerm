@@ -10,6 +10,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
+use gale_core::vault::CredentialKey;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
@@ -46,6 +47,20 @@ pub enum CertDecision {
 pub trait FtpPrompt: Send + Sync {
     fn ask_password(&self, prompt: &str) -> Option<String>;
     fn confirm_certificate(&self, info: &CertInfo) -> CertDecision;
+
+    /// [`Self::ask_password`] for a known credential, so the UI can offer to
+    /// remember the answer.
+    fn ask_credential(&self, _key: &CredentialKey, prompt: &str) -> Option<String> {
+        self.ask_password(prompt)
+    }
+
+    /// A saved password for `key`, tried once before asking.
+    fn saved_credential(&self, _key: &CredentialKey) -> Option<String> {
+        None
+    }
+
+    /// Whether `secret` for `key` was accepted, so it can be saved or forgotten.
+    fn credential_result(&self, _key: &CredentialKey, _secret: &str, _accepted: bool) {}
 }
 
 pub(crate) enum Stream {

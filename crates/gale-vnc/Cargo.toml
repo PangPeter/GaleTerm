@@ -1,0 +1,16 @@
+[package]
+name = "gale-vnc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VNC / RFB client for GaleTerm (Phase 3.5)"
+
+[dependencies]
+cipher = "0.4"
+des = "0.8"
+gale-core = { path = "../gale-core" }
+thiserror.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

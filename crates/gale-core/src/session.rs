@@ -39,6 +39,10 @@ pub enum Protocol {
     Tcp,
     Sftp,
     Ftp,
+    /// Remote Desktop Protocol (Phase 3.5).
+    Rdp,
+    /// VNC / RFB (Phase 3.5).
+    Vnc,
 }
 
 impl Protocol {
@@ -51,6 +55,8 @@ impl Protocol {
             Self::Tcp => "tcp",
             Self::Sftp => "sftp",
             Self::Ftp => "ftp",
+            Self::Rdp => "rdp",
+            Self::Vnc => "vnc",
         }
     }
 }
@@ -67,6 +73,8 @@ impl std::str::FromStr for Protocol {
             "tcp" | "raw" => Ok(Self::Tcp),
             "sftp" => Ok(Self::Sftp),
             "ftp" | "ftps" => Ok(Self::Ftp),
+            "rdp" => Ok(Self::Rdp),
+            "vnc" | "rfb" => Ok(Self::Vnc),
             other => Err(format!("unknown protocol: {other}")),
         }
     }
@@ -234,6 +242,47 @@ fn default_ftp_user() -> String {
     "anonymous".into()
 }
 
+/// VNC / RFB connection parameters (Phase 3.5 implements the client).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VncConfig {
+    pub host: String,
+    #[serde(default = "default_vnc_port")]
+    pub port: u16,
+    /// Stored only when the user explicitly opts in; prefer the system vault.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// SSH session used as a tunnel (`LocalForward`) before dialing VNC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_session_id: Option<SessionId>,
+}
+
+fn default_vnc_port() -> u16 {
+    5900
+}
+
+/// RDP connection parameters (Phase 3.5 implements the client).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RdpConfig {
+    pub host: String,
+    #[serde(default = "default_rdp_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    /// Windows domain / workgroup, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    /// Stored only when the user explicitly opts in; prefer the system vault.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// SSH session used as a tunnel (`LocalForward`) before dialing RDP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_session_id: Option<SessionId>,
+}
+
+fn default_rdp_port() -> u16 {
+    3389
+}
+
 /// Saved session profile (WindTerm-style session entry).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionProfile {
@@ -253,6 +302,10 @@ pub struct SessionProfile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ftp: Option<FtpConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vnc: Option<VncConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rdp: Option<RdpConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -271,6 +324,8 @@ impl SessionProfile {
             telnet: None,
             tcp: None,
             ftp: None,
+            vnc: None,
+            rdp: None,
             notes: None,
             created_at: now,
             updated_at: now,
@@ -302,6 +357,8 @@ impl SessionProfile {
             telnet: None,
             tcp: None,
             ftp: None,
+            vnc: None,
+            rdp: None,
             notes: None,
             created_at: now,
             updated_at: now,
@@ -323,6 +380,8 @@ impl SessionProfile {
             }),
             tcp: None,
             ftp: None,
+            vnc: None,
+            rdp: None,
             notes: None,
             created_at: now,
             updated_at: now,
@@ -344,6 +403,8 @@ impl SessionProfile {
                 port,
             }),
             ftp: None,
+            vnc: None,
+            rdp: None,
             notes: None,
             created_at: now,
             updated_at: now,
@@ -365,6 +426,37 @@ impl SessionProfile {
             username: username.into(),
             password: None,
             security,
+        });
+        profile
+    }
+
+    pub fn new_vnc(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
+        let mut profile = Self::new_local(name);
+        profile.protocol = Protocol::Vnc;
+        profile.vnc = Some(VncConfig {
+            host: host.into(),
+            port,
+            password: None,
+            jump_session_id: None,
+        });
+        profile
+    }
+
+    pub fn new_rdp(
+        name: impl Into<String>,
+        host: impl Into<String>,
+        username: impl Into<String>,
+        port: u16,
+    ) -> Self {
+        let mut profile = Self::new_local(name);
+        profile.protocol = Protocol::Rdp;
+        profile.rdp = Some(RdpConfig {
+            host: host.into(),
+            port,
+            username: username.into(),
+            domain: None,
+            password: None,
+            jump_session_id: None,
         });
         profile
     }
@@ -391,6 +483,8 @@ impl SessionProfile {
             telnet: None,
             tcp: None,
             ftp: None,
+            vnc: None,
+            rdp: None,
             notes: None,
             created_at: now,
             updated_at: now,
@@ -437,5 +531,21 @@ mod tests {
             let back: SessionProfile = serde_json::from_str(&json).unwrap();
             assert_eq!(&back, p);
         }
+    }
+
+    #[test]
+    fn roundtrip_vnc_and_rdp() {
+        let mut vnc = SessionProfile::new_vnc("lab-display", "10.0.0.5", 5901);
+        vnc.vnc.as_mut().unwrap().jump_session_id = Some(SessionId::new());
+        let mut rdp = SessionProfile::new_rdp("win-box", "desk.lan", "Administrator", 3389);
+        rdp.rdp.as_mut().unwrap().domain = Some("CORP".into());
+        for p in [&vnc, &rdp] {
+            let json = serde_json::to_string_pretty(p).unwrap();
+            assert!(!json.contains("password"));
+            let back: SessionProfile = serde_json::from_str(&json).unwrap();
+            assert_eq!(&back, p);
+        }
+        assert_eq!("rdp".parse::<Protocol>().unwrap(), Protocol::Rdp);
+        assert_eq!("rfb".parse::<Protocol>().unwrap(), Protocol::Vnc);
     }
 }

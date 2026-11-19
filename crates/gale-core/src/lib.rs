@@ -4,11 +4,12 @@ mod error;
 mod io;
 mod session;
 mod store;
+pub mod vault;
 
 pub use error::{Error, Result};
 pub use io::SessionInput;
 pub use session::{
-    AuthMethod, Protocol, ProxyConfig, ProxyKind, SerialConfig, SerialParity, FtpConfig, FtpSecurity, SessionId,
-    SessionProfile, SshAuth, SshConfig, TcpConfig, TelnetConfig,
+    AuthMethod, FtpConfig, FtpSecurity, Protocol, ProxyConfig, ProxyKind, RdpConfig, SerialConfig,
+    SerialParity, SessionId, SessionProfile, SshAuth, SshConfig, TcpConfig, TelnetConfig, VncConfig,
 };
 pub use store::{SessionStore, MAX_JUMP_DEPTH};

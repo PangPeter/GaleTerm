@@ -7,8 +7,10 @@ members = [
     "crates/gale-net",
     "crates/gale-serial",
     "crates/gale-ftp",
+    "crates/gale-vnc",
     "crates/gale-cli",
     "crates/gale-term-view",
+    "crates/gale-desktop-view",
     "apps/gale-desktop",
 ]
 default-members = ["crates/gale-cli"]

@@ -4,10 +4,12 @@
 //! Interactive prompts (unknown host key, password, key passphrase) are sent
 //! to the UI as [`PromptRequest`]s; the network task blocks until answered.
 
+use std::collections::HashSet;
 use std::sync::mpsc as std_mpsc;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{bail, Context as _};
+use gale_core::vault::{CredentialKey, Vault};
 use gale_core::{Protocol, SessionInput, SessionProfile, SessionStore};
 use gale_ftp::{CertDecision, CertInfo, FtpPrompt};
 use gale_net::{TcpSession, TcpSessionConfig, TelnetSession, TelnetSessionConfig};
@@ -42,7 +44,11 @@ pub enum PromptRequest {
     },
     Secret {
         prompt: String,
-        reply: std_mpsc::Sender<Option<String>>,
+        /// `Some(initial)` shows a "remember in keychain" checkbox.
+        remember: Option<bool>,
+        /// The saved secret for this credential was just rejected.
+        stale: bool,
+        reply: std_mpsc::Sender<Option<SecretAnswer>>,
     },
     /// FTPS server certificate not trusted by the system.
     Certificate {
@@ -51,15 +57,105 @@ pub enum PromptRequest {
     },
 }
 
-/// Bridges gale-ssh prompt callbacks to the UI thread.
+pub struct SecretAnswer {
+    pub value: String,
+    pub remember: bool,
+}
+
+#[derive(Default)]
+struct CredentialState {
+    /// Credentials the user asked to remember, saved once they work.
+    remember: HashSet<CredentialKey>,
+    /// Credentials handed out from the vault, awaiting their result.
+    from_vault: HashSet<CredentialKey>,
+    /// Saved credentials the server rejected.
+    stale: HashSet<CredentialKey>,
+}
+
+/// Bridges gale-ssh / gale-ftp prompt callbacks to the UI thread, and keeps
+/// remembered secrets in the system keychain.
 #[derive(Clone)]
 pub struct GuiPrompts {
     tx: async_channel::Sender<PromptRequest>,
+    vault: Option<Vault>,
+    state: Arc<Mutex<CredentialState>>,
 }
 
 impl GuiPrompts {
-    pub fn new(tx: async_channel::Sender<PromptRequest>) -> Self {
-        Self { tx }
+    pub fn new(tx: async_channel::Sender<PromptRequest>, vault: Option<Vault>) -> Self {
+        Self {
+            tx,
+            vault,
+            state: Arc::default(),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, CredentialState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub(crate) fn ask(&self, prompt: &str, remember: Option<bool>, stale: bool) -> Option<SecretAnswer> {
+        let (reply, answer) = std_mpsc::channel();
+        let req = PromptRequest::Secret {
+            prompt: prompt.trim().trim_end_matches(':').to_string(),
+            remember,
+            stale,
+            reply,
+        };
+        self.tx.send_blocking(req).ok()?;
+        answer.recv().ok().flatten()
+    }
+
+    pub(crate) fn ask_and_track(&self, key: &CredentialKey, prompt: &str) -> Option<String> {
+        if self.vault.is_none() {
+            return self.ask(prompt, None, false).map(|a| a.value);
+        }
+        // Someone who saved this before probably wants the new one saved too.
+        let stale = self.state().stale.contains(key);
+        let answer = self.ask(prompt, Some(stale), stale)?;
+        let mut state = self.state();
+        if answer.remember {
+            state.remember.insert(key.clone());
+        } else {
+            state.remember.remove(key);
+        }
+        Some(answer.value)
+    }
+
+    pub(crate) fn saved(&self, key: &CredentialKey) -> Option<String> {
+        let vault = self.vault.as_ref()?;
+        match vault.get(key) {
+            Ok(Some(secret)) => {
+                self.state().from_vault.insert(key.clone());
+                Some(secret)
+            }
+            Ok(None) => None,
+            Err(err) => {
+                tracing::warn!(%err, key = key.as_str(), "reading saved credential failed");
+                None
+            }
+        }
+    }
+
+    pub(crate) fn record(&self, key: &CredentialKey, secret: &str, accepted: bool) {
+        let Some(vault) = &self.vault else {
+            return;
+        };
+        let (save, was_saved) = {
+            let mut state = self.state();
+            let was_saved = state.from_vault.remove(key);
+            if accepted {
+                state.stale.remove(key);
+            } else if was_saved {
+                state.stale.insert(key.clone());
+            }
+            (accepted && state.remember.remove(key), was_saved)
+        };
+        if save && !was_saved {
+            if let Err(err) = vault.set(key, secret) {
+                tracing::warn!(%err, key = key.as_str(), "saving credential failed");
+            }
+        }
     }
 }
 
@@ -79,13 +175,19 @@ impl HostKeyPrompt for GuiPrompts {
 
 impl SecretPrompt for GuiPrompts {
     fn ask_secret(&self, prompt: &str) -> Option<String> {
-        let (reply, answer) = std_mpsc::channel();
-        let req = PromptRequest::Secret {
-            prompt: prompt.trim().trim_end_matches(':').to_string(),
-            reply,
-        };
-        self.tx.send_blocking(req).ok()?;
-        answer.recv().ok().flatten()
+        self.ask(prompt, None, false).map(|a| a.value)
+    }
+
+    fn ask_credential(&self, key: &CredentialKey, prompt: &str) -> Option<String> {
+        self.ask_and_track(key, prompt)
+    }
+
+    fn saved_credential(&self, key: &CredentialKey) -> Option<String> {
+        self.saved(key)
+    }
+
+    fn credential_result(&self, key: &CredentialKey, secret: &str, accepted: bool) {
+        self.record(key, secret, accepted);
     }
 }
 
@@ -114,6 +216,18 @@ pub fn ssh_config(
 impl FtpPrompt for GuiPrompts {
     fn ask_password(&self, prompt: &str) -> Option<String> {
         self.ask_secret(prompt)
+    }
+
+    fn ask_credential(&self, key: &CredentialKey, prompt: &str) -> Option<String> {
+        self.ask_and_track(key, prompt)
+    }
+
+    fn saved_credential(&self, key: &CredentialKey) -> Option<String> {
+        self.saved(key)
+    }
+
+    fn credential_result(&self, key: &CredentialKey, secret: &str, accepted: bool) {
+        self.record(key, secret, accepted);
     }
 
     fn confirm_certificate(&self, info: &CertInfo) -> CertDecision {
@@ -274,4 +388,60 @@ const RED: &str = "\x1b[31m";
 
 fn status_line(text: &str, sgr: &str) -> Vec<u8> {
     format!("\r\n{sgr}{}\x1b[0m\r\n", text.replace('\n', "\r\n")).into_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gale_core::vault::{CredentialKey, MemoryStore, Vault};
+
+    use super::GuiPrompts;
+
+    fn prompts() -> (GuiPrompts, Vault, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("gale-prompts-{}", uuid_like()));
+        let vault = Vault::new(Arc::new(MemoryStore::default()), dir.join("index.json"));
+        let (tx, _rx) = async_channel::unbounded();
+        (GuiPrompts::new(tx, Some(vault.clone())), vault, dir)
+    }
+
+    fn uuid_like() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    }
+
+    #[test]
+    fn remembered_secret_is_saved_only_once_accepted() {
+        let (prompts, vault, dir) = prompts();
+        let key = CredentialKey::password("ssh", "u", "h", 22);
+
+        prompts.state().remember.insert(key.clone());
+        prompts.record(&key, "wrong", false);
+        assert_eq!(vault.get(&key).unwrap(), None);
+
+        prompts.record(&key, "right", true);
+        assert_eq!(vault.get(&key).unwrap().as_deref(), Some("right"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rejected_saved_secret_is_marked_stale_not_deleted() {
+        let (prompts, vault, dir) = prompts();
+        let key = CredentialKey::password("ftp", "u", "h", 21);
+        vault.set(&key, "old").unwrap();
+
+        assert_eq!(prompts.saved(&key).as_deref(), Some("old"));
+        prompts.record(&key, "old", false);
+        assert!(prompts.state().stale.contains(&key));
+        assert_eq!(vault.get(&key).unwrap().as_deref(), Some("old"));
+
+        // The user re-enters it with "remember" ticked.
+        prompts.state().remember.insert(key.clone());
+        prompts.record(&key, "new", true);
+        assert!(!prompts.state().stale.contains(&key));
+        assert_eq!(vault.get(&key).unwrap().as_deref(), Some("new"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

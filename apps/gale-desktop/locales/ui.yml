@@ -61,6 +61,9 @@ app:
   coming_soon_hint:
     en: This section is being built. Hosts and local terminals already work.
     zh-CN: 该页面正在开发中，主机列表与本地终端已可用。
+  remote_desktop_soon:
+    en: "RDP tabs land later in Phase 3.5. VNC already works — try vnc://host[:port]."
+    zh-CN: "RDP 仍在 Phase 3.5 后续实现。VNC 已可用，可试 vnc://host[:port]。"
   remote_todo:
     en: Adding hosts in the app is coming soon — use `gale add` for now
     zh-CN: 应用内新建主机即将上线，目前请用 `gale add`
@@ -70,12 +73,39 @@ app:
   cert_hint:
     en: "The system does not trust this server's TLS certificate (often self-signed). Check the fingerprint with the server admin before continuing."
     zh-CN: "系统不信任该服务器的 TLS 证书（通常是自签证书）。请先与服务器管理员核对指纹再继续。"
+  remember_secret:
+    en: Remember in system keychain
+    zh-CN: 记住（保存到系统钥匙串）
+  saved_secret_rejected:
+    en: "The saved password was rejected. Enter the new one; it replaces the saved one if remembered."
+    zh-CN: "已保存的密码被拒绝。请输入新密码；勾选记住后会替换已保存的密码。"
+  keychain_hint:
+    en: "Passwords and key passphrases you chose to remember. They are kept in the system keychain, never in GaleTerm's files."
+    zh-CN: "你选择记住的密码和私钥口令。它们保存在系统钥匙串里，不会写进 GaleTerm 的配置文件。"
+  keychain_unavailable:
+    en: "The system keychain is not available, so secrets can't be remembered."
+    zh-CN: "系统钥匙串不可用，暂时无法记住密码。"
+  keychain_empty:
+    en: No saved credentials
+    zh-CN: 还没有保存的凭据
+  keychain_empty_hint:
+    en: "Tick “Remember” when GaleTerm asks for a password and it shows up here."
+    zh-CN: "连接时在密码框勾选“记住”，凭据就会出现在这里。"
+  credential_password:
+    en: Password
+    zh-CN: 密码
+  credential_passphrase:
+    en: Key passphrase
+    zh-CN: 私钥口令
+  forget:
+    en: Forget
+    zh-CN: 删除
   connect_failed:
     en: "Cannot connect: %{error}"
     zh-CN: "无法连接：%{error}"
   quick_connect_hint:
-    en: "Type user@host[:port] (or `telnet host[:port]`), or pick a host below"
-    zh-CN: "输入 user@host[:port]（或 `telnet host[:port]`），或在下方选择主机"
+    en: "Type user@host[:port], ftp/vnc/rdp URLs, or `telnet host[:port]`, or pick a host below"
+    zh-CN: "输入 user@host[:port]、ftp/vnc/rdp 地址，或 `telnet host[:port]`，或在下方选择主机"
   host_key_title:
     en: Unknown host
     zh-CN: 未知主机

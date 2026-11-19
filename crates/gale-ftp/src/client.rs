@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
+use gale_core::vault::CredentialKey;
 use gale_core::{FtpSecurity, SessionProfile};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -223,6 +224,15 @@ impl Control {
             cfg.username.as_str()
         };
         let anonymous = user.eq_ignore_ascii_case("anonymous") || user.eq_ignore_ascii_case("ftp");
+        let key = CredentialKey::password("ftp", user, &cfg.host, cfg.port);
+        // Password from this client's last login or the config; then the saved one.
+        let mut known = shared
+            .password
+            .lock()
+            .ok()
+            .and_then(|p| p.clone())
+            .or_else(|| cfg.password.clone());
+        let mut try_saved = !anonymous;
         for attempt in 0..PASSWORD_ATTEMPTS {
             let reply = self.command(&format!("USER {user}")).await?;
             match reply.code {
@@ -230,26 +240,33 @@ impl Control {
                 331 | 332 => {}
                 _ => return Err(Error::Login(reply.text)),
             }
-            let remembered = if attempt == 0 {
-                shared
-                    .password
-                    .lock()
-                    .ok()
-                    .and_then(|p| p.clone())
-                    .or_else(|| cfg.password.clone())
-            } else {
-                None
+            let saved = match (&cfg.prompt, known.is_none() && try_saved) {
+                (Some(prompt), true) => {
+                    try_saved = false;
+                    prompt.saved_credential(&key)
+                }
+                _ => None,
             };
-            let password = match remembered {
-                Some(p) => p,
-                None if anonymous => "anonymous@".to_string(),
-                None => cfg
-                    .prompt
-                    .as_ref()
-                    .and_then(|p| p.ask_password(&format!("Password for {user}@{}", cfg.host)))
-                    .ok_or(Error::Cancelled)?,
+            // Only secrets from the vault or the user are reported back.
+            let (password, report) = match (known.take(), saved) {
+                (Some(p), _) => (p, false),
+                (None, Some(p)) => (p, true),
+                (None, None) if anonymous => ("anonymous@".to_string(), false),
+                (None, None) => (
+                    cfg.prompt
+                        .as_ref()
+                        .and_then(|p| {
+                            p.ask_credential(&key, &format!("Password for {user}@{}", cfg.host))
+                        })
+                        .ok_or(Error::Cancelled)?,
+                    true,
+                ),
             };
             let reply = self.command(&format!("PASS {password}")).await?;
+            let accepted = matches!(reply.code, 230 | 202);
+            if let (true, Some(prompt)) = (report, &cfg.prompt) {
+                prompt.credential_result(&key, &password, accepted);
+            }
             match reply.code {
                 230 | 202 => {
                     if let Ok(mut slot) = shared.password.lock() {

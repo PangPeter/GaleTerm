@@ -55,7 +55,7 @@
 - 系统托盘：`tray-icon`
 - 全局快捷键（如 Quake 式下拉终端）：`global-hotkey`
 - 原生菜单：优先 gpui 自带平台菜单，不足再用 `muda`；命令面板（Cmd+K）后续
-- **会话模型预留**：`Protocol::Rdp` / `Protocol::Vnc` / 完善 `Protocol::Ftp`；桌面可建档
+- ~~**会话模型预留**~~：`Protocol::Ftp` / `Rdp` / `Vnc` 与配置字段已落地；桌面可建档（`gale add` / 快速连接）
 
 ### 双栏文件管理器（FTP / SFTP 共用）
 
@@ -113,10 +113,10 @@
 
 ### 建议实现顺序
 
-1. `gale-core` 增加 Rdp/Vnc 会话配置 + 桌面「新建远程桌面」表单  
-2. VNC MVP（协议更简单）→ gpui 帧显示 + 输入  
+1. ~~`gale-core` 增加 Rdp/Vnc 会话配置~~ ✅（CLI / 快速连接可建档；桌面内「新建远程桌面」表单仍待做）  
+2. ~~VNC MVP（协议更简单）→ gpui 帧显示 + 输入~~ ✅（`gale-vnc` + `gale-desktop-view`；Raw/CopyRect）  
 3. RDP MVP（IronRDP 或等价）→ 同视图管线  
-4. SSH 隧道一键：会话可选 `jump_session_id` / 本地转发自动拉起  
+4. SSH 隧道一键：会话已有 `jump_session_id` 字段 → 本地转发自动拉起  
 5. 剪贴板、全屏、缩放、重连策略  
 
 验收：桌面内打开 VNC/RDP Tab，可登录并键鼠操作；可经已有 SSH 会话隧道连接。

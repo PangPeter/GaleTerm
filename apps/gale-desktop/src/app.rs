@@ -4,12 +4,14 @@
 
 use std::collections::VecDeque;
 
+use gale_core::vault::{SavedCredential, Vault};
 use gale_core::{AuthMethod, FtpSecurity, Protocol, SessionProfile, SessionStore, SshAuth};
 use gale_ftp::CertDecision;
 use gale_ssh::HostKeyDecision;
 use gale_term_view::TerminalPane;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     input::{Copy, Input, InputEvent, InputState, Paste},
     label::Label,
     ActiveTheme, Icon, IconName, Sizable as _, TitleBar,
@@ -23,7 +25,10 @@ use crate::local_session::LocalTerminalTab;
 use crate::menus;
 
 mod palette;
-use crate::remote_session::{GuiPrompts, PromptRequest, RemoteTarget, RemoteTerminalTab};
+mod keychain;
+use crate::remote_session::{
+    GuiPrompts, PromptRequest, RemoteTarget, RemoteTerminalTab, SecretAnswer,
+};
 
 const TITLE_BAR_H: f32 = 44.;
 const SIDEBAR_W: f32 = 220.;
@@ -72,6 +77,7 @@ impl VaultSection {
 enum TabBackend {
     Local(LocalTerminalTab),
     Remote(RemoteTerminalTab),
+    Desktop(#[allow(dead_code)] crate::remote_desktop::RemoteDesktopTab),
 }
 
 impl TabBackend {
@@ -79,18 +85,37 @@ impl TabBackend {
         match self {
             Self::Local(tab) => tab.write_input(data),
             Self::Remote(tab) => tab.write_input(data),
+            Self::Desktop(_) => {}
         }
     }
+
+    fn is_desktop(&self) -> bool {
+        matches!(self, Self::Desktop(_))
+    }
+}
+
+enum TabContent {
+    Terminal(Entity<TerminalPane>),
+    Desktop(Entity<gale_desktop_view::DesktopPane>),
 }
 
 struct OpenTab {
     id: usize,
     title: SharedString,
     protocol: Protocol,
-    pane: Entity<TerminalPane>,
+    content: TabContent,
     backend: TabBackend,
     /// Remote side has gone away; the pane stays open for reading.
     closed: bool,
+}
+
+impl OpenTab {
+    fn terminal(&self) -> Option<&Entity<TerminalPane>> {
+        match &self.content {
+            TabContent::Terminal(pane) => Some(pane),
+            TabContent::Desktop(_) => None,
+        }
+    }
 }
 
 pub struct GaleApp {
@@ -111,6 +136,11 @@ pub struct GaleApp {
     /// Pending questions from network tasks; the front one is on screen.
     prompt_queue: VecDeque<PromptRequest>,
     secret_input: Entity<InputState>,
+    /// "Remember in keychain" checkbox of the password prompt.
+    remember_secret: bool,
+    vault: Option<Vault>,
+    /// Keychain page rows, reloaded when the page opens.
+    credentials: Vec<SavedCredential>,
     files: Entity<FileManager>,
     _subscriptions: Vec<Subscription>,
 }
@@ -177,7 +207,10 @@ impl GaleApp {
         let root_focus = cx.focus_handle();
         window.focus(&root_focus, cx);
 
-        let prompts = GuiPrompts::new(prompt_tx);
+        let vault = Vault::open_default()
+            .inspect_err(|err| tracing::warn!(%err, "credential vault unavailable"))
+            .ok();
+        let prompts = GuiPrompts::new(prompt_tx, vault.clone());
         let files = {
             let prompts = prompts.clone();
             let hosts = sessions.clone();
@@ -201,6 +234,9 @@ impl GaleApp {
             prompts,
             prompt_queue: VecDeque::new(),
             secret_input,
+            remember_secret: false,
+            vault,
+            credentials: Vec::new(),
             files,
             _subscriptions: subscriptions,
         }
@@ -244,9 +280,16 @@ impl GaleApp {
 
     /// Give keyboard focus back to the page after an overlay closes.
     fn restore_focus(&self, window: &mut Window, cx: &mut App) {
-        if self.page == Page::Terminal && self.active_tab.is_some() {
-            window.focus(&self.term_focus, cx);
-        } else if self.page == Page::Sftp {
+        if self.page == Page::Terminal {
+            if let Some(tab) = self.active_tab.and_then(|id| self.tabs.iter().find(|t| t.id == id)) {
+                match &tab.content {
+                    TabContent::Terminal(_) => window.focus(&self.term_focus, cx),
+                    TabContent::Desktop(pane) => window.focus(&pane.read(cx).focus_handle(), cx),
+                }
+                return;
+            }
+        }
+        if self.page == Page::Sftp {
             window.focus(&self.files.read(cx).focus_handle(), cx);
         } else {
             window.focus(&self.root_focus, cx);
@@ -298,6 +341,14 @@ impl GaleApp {
                     .update(cx, |files, cx| files.connect(profile, window, cx));
                 return;
             }
+            Protocol::Vnc => {
+                self.open_vnc(profile, window, cx);
+                return;
+            }
+            Protocol::Rdp => {
+                self.notify_user(i18n::tr("app.remote_desktop_soon"), cx);
+                return;
+            }
             _ => {}
         }
 
@@ -332,8 +383,44 @@ impl GaleApp {
             id,
             title: SharedString::from(profile.name.clone()),
             protocol: profile.protocol,
-            pane: tab.pane.clone(),
+            content: TabContent::Terminal(tab.pane.clone()),
             backend: TabBackend::Remote(tab),
+            closed: false,
+        });
+        self.active_tab = Some(id);
+        self.show_page(Page::Terminal, window, cx);
+    }
+
+    fn open_vnc(&mut self, profile: SessionProfile, window: &mut Window, cx: &mut Context<Self>) {
+        let id = self.next_tab_id;
+        self.next_tab_id += 1;
+        let owner = cx.entity().downgrade();
+        let tab = match crate::remote_desktop::RemoteDesktopTab::connect(
+            profile.clone(),
+            self.prompts.clone(),
+            move |_, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    if let Some(tab) = this.tabs.iter_mut().find(|t| t.id == id) {
+                        tab.closed = true;
+                        cx.notify();
+                    }
+                });
+            },
+            window,
+            cx,
+        ) {
+            Ok(tab) => tab,
+            Err(err) => {
+                self.notify_user(i18n::tr_error("app.connect_failed", &format!("{err:#}")), cx);
+                return;
+            }
+        };
+        self.tabs.push(OpenTab {
+            id,
+            title: SharedString::from(profile.name),
+            protocol: Protocol::Vnc,
+            content: TabContent::Desktop(tab.pane.clone()),
+            backend: TabBackend::Desktop(tab),
             closed: false,
         });
         self.active_tab = Some(id);
@@ -351,7 +438,8 @@ impl GaleApp {
     /// Prepare the UI for the prompt now at the front of the queue.
     fn present_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.prompt_queue.front() {
-            Some(PromptRequest::Secret { .. }) => {
+            Some(PromptRequest::Secret { remember, .. }) => {
+                self.remember_secret = remember.unwrap_or(false);
                 self.secret_input.update(cx, |s, cx| {
                     s.set_value("", window, cx);
                     s.focus(window, cx);
@@ -390,8 +478,13 @@ impl GaleApp {
             let value = self.secret_input.read(cx).value().to_string();
             self.secret_input
                 .update(cx, |s, cx| s.set_value("", window, cx));
-            if let Some(PromptRequest::Secret { reply, .. }) = self.prompt_queue.pop_front() {
-                let _ = reply.send(accept.then_some(value));
+            if let Some(PromptRequest::Secret { reply, remember, .. }) = self.prompt_queue.pop_front()
+            {
+                let answer = SecretAnswer {
+                    value,
+                    remember: remember.is_some() && self.remember_secret,
+                };
+                let _ = reply.send(accept.then_some(answer));
             }
             self.present_prompt(window, cx);
         }
@@ -415,7 +508,7 @@ impl GaleApp {
             id,
             title: i18n::tr("app.local_tab"),
             protocol: Protocol::Local,
-            pane,
+            content: TabContent::Terminal(pane),
             backend: TabBackend::Local(tab),
             closed: false,
         });
@@ -465,7 +558,8 @@ impl GaleApp {
         let text = self
             .active_tab
             .and_then(|id| self.tabs.iter().find(|t| t.id == id))
-            .and_then(|tab| tab.pane.read(cx).selection_text());
+            .and_then(|tab| tab.terminal())
+            .and_then(|pane| pane.read(cx).selection_text());
         if let Some(text) = text {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
@@ -483,9 +577,12 @@ impl GaleApp {
         let Some(tab) = self.active_open_tab() else {
             return;
         };
+        let Some(pane) = tab.terminal().cloned() else {
+            return;
+        };
         let text = text.replace("\r\n", "\r").replace('\n', "\r");
-        tab.pane.update(cx, |pane, cx| pane.on_user_input(cx));
-        if tab.pane.read(cx).input_modes().bracketed_paste {
+        pane.update(cx, |pane, cx| pane.on_user_input(cx));
+        if pane.read(cx).input_modes().bracketed_paste {
             let body = text.replace('\x1b', "");
             tab.backend
                 .write_input(format!("\x1b[200~{body}\x1b[201~").as_bytes());
@@ -521,12 +618,15 @@ impl GaleApp {
         let Some(tab) = self.active_open_tab() else {
             return;
         };
+        let Some(pane) = tab.terminal().cloned() else {
+            return;
+        };
         let backend = &tab.backend;
         let ks = &event.keystroke;
         if ks.modifiers.platform {
             return;
         }
-        tab.pane.update(cx, |pane, cx| pane.on_user_input(cx));
+        pane.update(cx, |pane, cx| pane.on_user_input(cx));
         if ks.modifiers.control {
             let key = ks.key.as_bytes();
             if key.len() == 1 && key[0].is_ascii_alphabetic() {
@@ -534,7 +634,7 @@ impl GaleApp {
                 return;
             }
         }
-        let app_cursor = tab.pane.read(cx).input_modes().app_cursor;
+        let app_cursor = pane.read(cx).input_modes().app_cursor;
         let cursor = |normal: &'static [u8], app: &'static [u8]| if app_cursor { app } else { normal };
         let seq: &[u8] = match ks.key.as_str() {
             "enter" => b"\r",
@@ -610,13 +710,24 @@ pub(crate) fn session_target(s: &SessionProfile) -> String {
             .as_ref()
             .map(|c| format!("{}@{}:{}", c.username, c.host, c.port))
             .unwrap_or_default(),
+        Protocol::Vnc => s
+            .vnc
+            .as_ref()
+            .map(|c| format!("{}:{}", c.host, c.port))
+            .unwrap_or_default(),
+        Protocol::Rdp => s
+            .rdp
+            .as_ref()
+            .map(|c| format!("{}@{}:{}", c.username, c.host, c.port))
+            .unwrap_or_default(),
         Protocol::Local => "local-shell".into(),
         other => other.as_str().into(),
     }
 }
 
-/// Parse `[ssh ]user@host[:port]`, `host`, `telnet host[:port]`, or
-/// `ftp://` / `ftps://` / `ftp user@host` into an unsaved profile.
+/// Parse `[ssh ]user@host[:port]`, `host`, `telnet host[:port]`,
+/// `ftp://` / `ftps://` / `ftp user@host`, `vnc://host[:port]`, or
+/// `rdp://user@host[:port]` into an unsaved profile.
 pub(crate) fn parse_quick_connect(input: &str) -> Option<SessionProfile> {
     let input = input.trim();
     let (kind, rest) = if let Some(rest) = input.strip_prefix("telnet ") {
@@ -628,11 +739,21 @@ pub(crate) fn parse_quick_connect(input: &str) -> Option<SessionProfile> {
         .or_else(|| input.strip_prefix("ftp "))
     {
         (Some(Protocol::Ftp), rest)
+    } else if let Some(rest) = input
+        .strip_prefix("vnc://")
+        .or_else(|| input.strip_prefix("vnc "))
+    {
+        (Some(Protocol::Vnc), rest)
+    } else if let Some(rest) = input
+        .strip_prefix("rdp://")
+        .or_else(|| input.strip_prefix("rdp "))
+    {
+        (Some(Protocol::Rdp), rest)
     } else {
         (None, input.strip_prefix("ssh ").unwrap_or(input))
     };
     let rest = rest.trim();
-    let rest = if kind == Some(Protocol::Ftp) {
+    let rest = if matches!(kind, Some(Protocol::Ftp | Protocol::Vnc | Protocol::Rdp)) {
         rest.trim_end_matches('/')
     } else {
         rest
@@ -652,7 +773,7 @@ pub(crate) fn parse_quick_connect(input: &str) -> Option<SessionProfile> {
         Some(Protocol::Telnet) => {
             return Some(SessionProfile::new_telnet(host.clone(), host, port.unwrap_or(23)));
         }
-        Some(_) => {
+        Some(Protocol::Ftp) => {
             let security = if input.starts_with("ftps://") {
                 FtpSecurity::Explicit
             } else {
@@ -662,7 +783,16 @@ pub(crate) fn parse_quick_connect(input: &str) -> Option<SessionProfile> {
             let name = format!("ftp://{user}@{host}");
             return Some(SessionProfile::new_ftp(name, host, user, port.unwrap_or(21), security));
         }
-        None => {}
+        Some(Protocol::Vnc) => {
+            let name = format!("vnc://{host}");
+            return Some(SessionProfile::new_vnc(name, host, port.unwrap_or(5900)));
+        }
+        Some(Protocol::Rdp) => {
+            let user = user.unwrap_or_else(|| "Administrator".into());
+            let name = format!("rdp://{user}@{host}");
+            return Some(SessionProfile::new_rdp(name, host, user, port.unwrap_or(3389)));
+        }
+        Some(_) | None => {}
     }
     let user = user
         .or_else(|| std::env::var("USER").ok())
@@ -713,6 +843,7 @@ fn protocol_icon(p: Protocol) -> IconName {
     match p {
         Protocol::Serial => IconName::Network,
         Protocol::Sftp | Protocol::Ftp => IconName::Folder,
+        Protocol::Rdp | Protocol::Vnc => IconName::LayoutDashboard,
         _ => IconName::SquareTerminal,
     }
 }
@@ -725,6 +856,8 @@ fn protocol_color(p: Protocol) -> Hsla {
         Protocol::Tcp => rgb(0x3d8fd6),
         Protocol::Local => rgb(0x5c6378),
         Protocol::Ftp => rgb(0x2a9d8f),
+        Protocol::Vnc => rgb(0xe76f51),
+        Protocol::Rdp => rgb(0x457b9d),
         _ => rgb(0xb05fc9),
     }
     .into()
@@ -934,7 +1067,12 @@ impl GaleApp {
                         ),
                 )
             }
-            PromptRequest::Secret { prompt, .. } => card
+            PromptRequest::Secret {
+                prompt,
+                remember,
+                stale,
+                ..
+            } => card
                 .child(
                     div()
                         .flex()
@@ -959,7 +1097,25 @@ impl GaleApp {
                                 ),
                         ),
                 )
+                .when(*stale, |s| {
+                    s.child(
+                        Label::new(i18n::tr("app.saved_secret_rejected"))
+                            .text_sm()
+                            .text_color(theme.warning),
+                    )
+                })
                 .child(Input::new(&self.secret_input).large().mask_toggle())
+                .when(remember.is_some(), |s| {
+                    s.child(
+                        Checkbox::new("secret-remember")
+                            .label(i18n::tr("app.remember_secret"))
+                            .checked(self.remember_secret)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.remember_secret = *checked;
+                                cx.notify();
+                            })),
+                    )
+                })
                 .child(
                     actions
                         .child(
@@ -1160,6 +1316,7 @@ impl GaleApp {
                     .child(match self.section {
                         VaultSection::Hosts => self.render_hosts(cx).into_any_element(),
                         VaultSection::Settings => self.render_settings(cx).into_any_element(),
+                        VaultSection::Keychain => self.render_keychain(cx).into_any_element(),
                         other => self
                             .render_placeholder(other.icon(), i18n::tr(other.label_key()), cx)
                             .into_any_element(),
@@ -1199,6 +1356,9 @@ impl GaleApp {
                 .child(i18n::tr(section.label_key()))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.section = section;
+                    if section == VaultSection::Keychain {
+                        this.reload_credentials();
+                    }
                     cx.notify();
                 }))
         };
@@ -1553,11 +1713,12 @@ impl GaleApp {
 
     fn render_terminal(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.active_tab;
-        let pane = self
-            .tabs
-            .iter()
-            .find(|t| Some(t.id) == active)
-            .map(|t| t.pane.clone());
+        let tab = self.tabs.iter().find(|t| Some(t.id) == active);
+        let is_desktop = tab.is_some_and(|t| t.backend.is_desktop());
+        let content = tab.map(|t| match &t.content {
+            TabContent::Terminal(pane) => pane.clone().into_any_element(),
+            TabContent::Desktop(pane) => pane.clone().into_any_element(),
+        });
         let bg = cx.theme().background;
 
         div()
@@ -1566,14 +1727,16 @@ impl GaleApp {
             .track_focus(&self.term_focus)
             .size_full()
             .bg(bg)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.send_key(event, cx)))
-            .on_action(cx.listener(|this, _: &Paste, _, cx| this.paste_into_terminal(cx)))
-            .on_action(cx.listener(|this, _: &Copy, _, cx| this.copy_from_terminal(cx)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| window.focus(&this.term_focus, cx)),
-            )
-            .map(|s| match pane {
+            .when(!is_desktop, |s| {
+                s.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.send_key(event, cx)))
+                    .on_action(cx.listener(|this, _: &Paste, _, cx| this.paste_into_terminal(cx)))
+                    .on_action(cx.listener(|this, _: &Copy, _, cx| this.copy_from_terminal(cx)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| window.focus(&this.term_focus, cx)),
+                    )
+            })
+            .map(|s| match content {
                 Some(pane) => s.child(pane),
                 None => s.child(
                     self.empty_state(
@@ -1633,5 +1796,17 @@ mod tests {
 
         let ftp = parse_quick_connect("ftp 10.0.0.9").unwrap().ftp.unwrap();
         assert_eq!((ftp.username.as_str(), ftp.port, ftp.security), ("anonymous", 21, FtpSecurity::Auto));
+    }
+
+    #[test]
+    fn quick_connect_parses_vnc_and_rdp() {
+        let vnc = parse_quick_connect("vnc://10.0.0.5:5901").unwrap();
+        assert_eq!(vnc.protocol, Protocol::Vnc);
+        assert_eq!(vnc.vnc.unwrap().port, 5901);
+
+        let rdp = parse_quick_connect("rdp alice@desk.lan").unwrap();
+        assert_eq!(rdp.protocol, Protocol::Rdp);
+        let cfg = rdp.rdp.unwrap();
+        assert_eq!((cfg.username.as_str(), cfg.host.as_str(), cfg.port), ("alice", "desk.lan", 3389));
     }
 }
