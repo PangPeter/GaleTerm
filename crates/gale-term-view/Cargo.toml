@@ -1,0 +1,14 @@
+[package]
+name = "gale-term-view"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "gpui terminal view for GaleTerm (renders TerminalEmulator)"
+
+[dependencies]
+gale-term = { path = "../gale-term" }
+gpui-kit.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

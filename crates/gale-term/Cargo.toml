@@ -1,0 +1,14 @@
+[package]
+name = "gale-term"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PTY and terminal emulation for GaleTerm"
+
+[dependencies]
+alacritty_terminal.workspace = true
+portable-pty.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

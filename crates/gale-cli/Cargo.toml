@@ -1,0 +1,26 @@
+[package]
+name = "gale-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GaleTerm CLI MVP — local shell and SSH sessions"
+
+[[bin]]
+name = "gale"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+dirs.workspace = true
+gale-core = { path = "../gale-core" }
+gale-net = { path = "../gale-net" }
+gale-serial = { path = "../gale-serial" }
+gale-ssh = { path = "../gale-ssh" }
+gale-term = { path = "../gale-term" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

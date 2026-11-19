@@ -1,0 +1,19 @@
+[package]
+name = "gale-ftp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FTP / FTPS client for GaleTerm"
+
+[dependencies]
+chrono.workspace = true
+dirs.workspace = true
+gale-core = { path = "../gale-core" }
+rustls-native-certs = "0.8"
+sha2 = "0.10"
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+tracing.workspace = true
+[lints]
+workspace = true

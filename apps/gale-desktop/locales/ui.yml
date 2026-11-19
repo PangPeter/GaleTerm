@@ -1,0 +1,350 @@
+_version: 2
+
+app:
+  window_title:
+    en: GaleTerm
+    zh-CN: GaleTerm
+  vault:
+    en: Vault
+    zh-CN: Vault
+  sftp:
+    en: SFTP
+    zh-CN: SFTP
+  hosts:
+    en: Hosts
+    zh-CN: 主机
+  keychain:
+    en: Keychain
+    zh-CN: 密钥
+  port_forwarding:
+    en: Port Forwarding
+    zh-CN: 端口转发
+  snippets:
+    en: Snippets
+    zh-CN: 代码片段
+  known_hosts:
+    en: Known Hosts
+    zh-CN: 已知主机
+  settings:
+    en: Settings
+    zh-CN: 设置
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+  connect:
+    en: CONNECT
+    zh-CN: 连接
+  new_host:
+    en: NEW HOST
+    zh-CN: 新建主机
+  local_terminal:
+    en: TERMINAL
+    zh-CN: 本地终端
+  search_hosts:
+    en: Find a host or ssh user@hostname…
+    zh-CN: 搜索主机，或输入 ssh user@hostname…
+  local_tab:
+    en: Local
+    zh-CN: 本地
+  ready:
+    en: Ready
+    zh-CN: 就绪
+  status_sessions:
+    en: "%{count} hosts"
+    zh-CN: "%{count} 台主机"
+  status_local_failed:
+    en: "Local shell failed: %{error}"
+    zh-CN: "本地终端启动失败：%{error}"
+  coming_soon:
+    en: Coming soon
+    zh-CN: 即将推出
+  coming_soon_hint:
+    en: This section is being built. Hosts and local terminals already work.
+    zh-CN: 该页面正在开发中，主机列表与本地终端已可用。
+  remote_todo:
+    en: Adding hosts in the app is coming soon — use `gale add` for now
+    zh-CN: 应用内新建主机即将上线，目前请用 `gale add`
+  cert_title:
+    en: Untrusted certificate
+    zh-CN: 证书不受信任
+  cert_hint:
+    en: "The system does not trust this server's TLS certificate (often self-signed). Check the fingerprint with the server admin before continuing."
+    zh-CN: "系统不信任该服务器的 TLS 证书（通常是自签证书）。请先与服务器管理员核对指纹再继续。"
+  connect_failed:
+    en: "Cannot connect: %{error}"
+    zh-CN: "无法连接：%{error}"
+  quick_connect_hint:
+    en: "Type user@host[:port] (or `telnet host[:port]`), or pick a host below"
+    zh-CN: "输入 user@host[:port]（或 `telnet host[:port]`），或在下方选择主机"
+  host_key_title:
+    en: Unknown host
+    zh-CN: 未知主机
+  host_key_hint:
+    en: "The authenticity of this host can't be established. Make sure the fingerprint matches before continuing."
+    zh-CN: "无法确认该主机的真实性。请确认指纹无误后再继续。"
+  accept_save:
+    en: Accept & Save
+    zh-CN: 信任并保存
+  accept_once:
+    en: Accept Once
+    zh-CN: 仅本次信任
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  continue:
+    en: Continue
+    zh-CN: 继续
+  auth_title:
+    en: Authentication
+    zh-CN: 身份验证
+  palette_placeholder:
+    en: Search hosts, tabs and commands, or type user@host…
+    zh-CN: 搜索主机、标签页和命令，或输入 user@host…
+  palette_connect:
+    en: Quick connect
+    zh-CN: 快速连接
+  palette_tabs:
+    en: Open tabs
+    zh-CN: 已打开的标签页
+  palette_commands:
+    en: Commands
+    zh-CN: 命令
+  menu_services:
+    en: Services
+    zh-CN: 服务
+  menu_file:
+    en: File
+    zh-CN: 文件
+  menu_edit:
+    en: Edit
+    zh-CN: 编辑
+  menu_view:
+    en: View
+    zh-CN: 显示
+  menu_window:
+    en: Window
+    zh-CN: 窗口
+  cmd_settings:
+    en: Settings…
+    zh-CN: 设置…
+  cmd_hide:
+    en: Hide GaleTerm
+    zh-CN: 隐藏 GaleTerm
+  cmd_quit:
+    en: Quit GaleTerm
+    zh-CN: 退出 GaleTerm
+  cmd_new_local:
+    en: New Local Terminal
+    zh-CN: 新建本地终端
+  cmd_quick_connect:
+    en: Quick Connect…
+    zh-CN: 快速连接…
+  cmd_close_tab:
+    en: Close Tab
+    zh-CN: 关闭标签页
+  cmd_cut:
+    en: Cut
+    zh-CN: 剪切
+  cmd_copy:
+    en: Copy
+    zh-CN: 拷贝
+  cmd_paste:
+    en: Paste
+    zh-CN: 粘贴
+  cmd_select_all:
+    en: Select All
+    zh-CN: 全选
+  cmd_palette:
+    en: Command Palette…
+    zh-CN: 命令面板…
+  cmd_vault:
+    en: Go to Vault
+    zh-CN: 前往 Vault
+  cmd_sftp:
+    en: Go to SFTP
+    zh-CN: 前往 SFTP
+  cmd_refresh:
+    en: Reload Hosts
+    zh-CN: 重新载入主机
+  cmd_fullscreen:
+    en: Toggle Full Screen
+    zh-CN: 切换全屏
+  cmd_minimize:
+    en: Minimize
+    zh-CN: 最小化
+  cmd_next_tab:
+    en: Next Tab
+    zh-CN: 下一个标签页
+  cmd_prev_tab:
+    en: Previous Tab
+    zh-CN: 上一个标签页
+  empty_vault_title:
+    en: Create your first host
+    zh-CN: 创建你的第一台主机
+  empty_vault_hint:
+    en: "Save connection details once, connect in one click. For now add hosts with `gale add`."
+    zh-CN: "保存一次连接信息，之后一键连接。目前可用 `gale add` 添加主机。"
+  no_match:
+    en: No hosts match your search
+    zh-CN: 没有匹配的主机
+  empty_terminal:
+    en: No open connections
+    zh-CN: 没有打开的连接
+  empty_terminal_hint:
+    en: Pick a host from Vault, or open a local terminal.
+    zh-CN: 从 Vault 选择主机，或打开本地终端。
+  language:
+    en: Language
+    zh-CN: 语言
+  language_auto:
+    en: System
+    zh-CN: 跟随系统
+  language_en:
+    en: English
+    zh-CN: English
+  language_zh_cn:
+    en: 简体中文
+    zh-CN: 简体中文
+
+files:
+  local:
+    en: Local
+    zh-CN: 本地
+  remote:
+    en: Remote
+    zh-CN: 远程
+  host_search:
+    en: "Search hosts, or type user@host / ftp://user@host"
+    zh-CN: "搜索主机，或输入 user@host / ftp://user@host"
+  pick_host:
+    en: Connect a remote host
+    zh-CN: 连接远程主机
+  pick_host_hint:
+    en: "Pick an SSH (SFTP) or FTP host, then drag files between the two panes. ftps:// requires TLS; ftp:// uses TLS when the server offers it."
+    zh-CN: "选择一台 SSH（SFTP）或 FTP 主机，之后可以在左右两栏之间拖拽传输。ftps:// 强制 TLS；ftp:// 在服务器支持时自动启用 TLS。"
+  connect_hint:
+    en: "Pick a host below, or type user@host[:port] / ftp://user@host[:port]"
+    zh-CN: "请从下方选择主机，或输入 user@host[:port] / ftp://user@host[:port]"
+  connecting:
+    en: Connecting to
+    zh-CN: 正在连接
+  insecure:
+    en: Not encrypted
+    zh-CN: 未加密
+  disconnect:
+    en: Disconnect
+    zh-CN: 断开
+  col_name:
+    en: Name
+    zh-CN: 名称
+  col_modified:
+    en: Modified
+    zh-CN: 修改时间
+  col_size:
+    en: Size
+    zh-CN: 大小
+  col_mode:
+    en: Permissions
+    zh-CN: 权限
+  loading:
+    en: Loading…
+    zh-CN: 加载中…
+  empty_folder:
+    en: This folder is empty
+    zh-CN: 空文件夹
+  items:
+    en: "%{count} items"
+    zh-CN: "%{count} 项"
+  selected:
+    en: "%{selected} of %{total} selected"
+    zh-CN: "已选 %{selected} / %{total} 项"
+  upload:
+    en: Upload
+    zh-CN: 上传
+  download:
+    en: Download
+    zh-CN: 下载
+  rename:
+    en: Rename
+    zh-CN: 重命名
+  delete:
+    en: Delete
+    zh-CN: 删除
+  new_folder:
+    en: New folder
+    zh-CN: 新建文件夹
+  create:
+    en: Create
+    zh-CN: 创建
+  delete_title:
+    en: "Delete %{count} items?"
+    zh-CN: "删除 %{count} 项？"
+  delete_hint:
+    en: "Folders are deleted with everything inside. This cannot be undone."
+    zh-CN: "文件夹会连同内容一起删除，且无法恢复。"
+  overwrite_title:
+    en: "%{count} items already exist"
+    zh-CN: "%{count} 项已存在"
+  overwrite_hint:
+    en: "The destination already has items with these names. Replace them?"
+    zh-CN: "目标位置已有同名项目，是否替换？"
+  replace:
+    en: Replace
+    zh-CN: 替换
+  transfers:
+    en: Transfers
+    zh-CN: 传输
+  clear_finished:
+    en: Clear finished
+    zh-CN: 清除已完成
+  done:
+    en: Done
+    zh-CN: 完成
+  cancelled:
+    en: Cancelled
+    zh-CN: 已取消
+  filter:
+    en: Filter
+    zh-CN: 筛选
+  multi_select:
+    en: Multi-select
+    zh-CN: 多选模式
+  select_all:
+    en: Select all
+    zh-CN: 全选
+  show_hidden:
+    en: Show hidden files
+    zh-CN: 显示隐藏文件
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+  open:
+    en: Open
+    zh-CN: 打开
+  open_with_system:
+    en: Open with default app
+    zh-CN: 用默认应用打开
+  reveal:
+    en: Show in Finder
+    zh-CN: 在访达中显示
+  copy_name:
+    en: Copy name
+    zh-CN: 复制名称
+  copy_path:
+    en: Copy path
+    zh-CN: 复制路径
+  chmod:
+    en: Permissions…
+    zh-CN: 修改权限…
+  chmod_title:
+    en: "Change permissions of %{count} items"
+    zh-CN: "修改 %{count} 项的权限"
+  chmod_hint:
+    en: "Octal mode, e.g. 644 for files or 755 for folders and scripts."
+    zh-CN: "八进制权限，例如文件用 644，目录和脚本用 755。"
+  apply:
+    en: Apply
+    zh-CN: 应用
+  new_file:
+    en: New file
+    zh-CN: 新建文件

@@ -1,0 +1,22 @@
+[package]
+name = "gale-ssh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SSH client layer for GaleTerm"
+
+[dependencies]
+anyhow.workspace = true
+dirs.workspace = true
+gale-core = { path = "../gale-core" }
+russh.workspace = true
+russh-sftp.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

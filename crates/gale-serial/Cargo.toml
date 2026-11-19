@@ -1,0 +1,15 @@
+[package]
+name = "gale-serial"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Serial port sessions for GaleTerm"
+
+[dependencies]
+gale-core = { path = "../gale-core" }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-serial = "5.5"
+
+[lints]
+workspace = true

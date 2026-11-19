@@ -1,0 +1,129 @@
+{
+  "name": "Gale Termius",
+  "author": "GaleTerm",
+  "themes": [
+    {
+      "is_default": true,
+      "name": "Termius Night",
+      "mode": "dark",
+      "font.size": 14,
+      "font.family": ".SystemUIFont",
+      "mono_font.family": "MesloLGS NF",
+      "mono_font.size": 13,
+      "radius": 8,
+      "radius.lg": 12,
+      "window.radius": 10,
+      "shadow": true,
+      "colors": {
+        "background": "#1C1F28",
+        "foreground": "#E8EAF0",
+        "border": "#2C3040",
+        "window.border": "#2C3040",
+        "overlay": "#00000088",
+
+        "muted.background": "#242835",
+        "muted.foreground": "#8A91A5",
+
+        "accent.background": "#2C2858",
+        "accent.foreground": "#E4E0FF",
+
+        "primary.background": "#6C5CE7",
+        "primary.hover.background": "#7D6FF0",
+        "primary.active.background": "#5A4BD1",
+        "primary.foreground": "#FFFFFF",
+
+        "secondary.background": "#262A37",
+        "secondary.hover.background": "#2E3343",
+        "secondary.active.background": "#363C4F",
+        "secondary.foreground": "#E8EAF0",
+
+        "sidebar.background": "#171A22",
+        "sidebar.foreground": "#C9CDD8",
+        "sidebar.border": "#00000000",
+        "sidebar.accent.background": "#262A37",
+        "sidebar.accent.foreground": "#FFFFFF",
+        "sidebar.primary.background": "#6C5CE7",
+        "sidebar.primary.foreground": "#FFFFFF",
+
+        "title_bar.background": "#12141B",
+        "title_bar.border": "#00000000",
+        "status_bar.background": "#12141B",
+        "status_bar.border": "#00000000",
+
+        "tab_bar.background": "#12141B",
+        "tab_bar.segmented.background": "#1C1F28",
+        "tab.background": "#00000000",
+        "tab.foreground": "#8A91A5",
+        "tab.active.background": "#262A37",
+        "tab.active.foreground": "#FFFFFF",
+
+        "list.background": "#171A22",
+        "list.hover.background": "#222633",
+        "list.active.background": "#262A37",
+        "list.active.border": "#6C5CE7",
+        "list.even.background": "#171A22",
+        "list.head.background": "#1C1F28",
+        "list.highlight.foreground": "#7D6FF0",
+
+        "input.border": "#2C3040",
+        "ring": "#6C5CE7",
+        "caret": "#E8EAF0",
+        "selection.background": "#6C5CE766",
+
+        "popover.background": "#242835",
+        "popover.foreground": "#E8EAF0",
+
+        "danger.background": "#E06C75",
+        "danger.foreground": "#FFFFFF",
+        "warning.background": "#E5C07B",
+        "warning.foreground": "#1A1608",
+        "success.background": "#3DDC97",
+        "success.foreground": "#0C1410",
+        "info.background": "#61AFEF",
+        "info.foreground": "#0C1018",
+
+        "scrollbar.background": "#00000000",
+        "scrollbar.thumb.background": "#3A4155CC",
+        "scrollbar.thumb.hover.background": "#4A5268",
+
+        "link.foreground": "#8B7CF0",
+        "link.hover.foreground": "#A498F5",
+        "link.active.foreground": "#6C5CE7",
+
+        "group_box.background": "#242835",
+        "group_box.foreground": "#E8EAF0",
+        "accordion.background": "#1C1F28",
+        "skeleton.background": "#242835",
+        "switch.background": "#363C4F",
+        "progress_bar.background": "#6C5CE7",
+        "slider.bar.background": "#6C5CE7",
+        "slider.thumb.background": "#E8EAF0",
+
+        "table.background": "#1C1F28",
+        "table.head.background": "#242835",
+        "table.head.foreground": "#8A91A5",
+        "table.row.border": "#2C304099",
+        "table.hover.background": "#262A37",
+        "table.active.background": "#2C285899",
+        "table.active.border": "#6C5CE7",
+        "table.even.background": "#171A2266",
+
+        "drag_border": "#6C5CE7",
+        "drop_target.background": "#6C5CE722",
+
+        "base.red": "#E06C75",
+        "base.red.light": "#F0A0A6",
+        "base.green": "#3DDC97",
+        "base.green.light": "#6EEBB3",
+        "base.blue": "#61AFEF",
+        "base.blue.light": "#8FC7F5",
+        "base.yellow": "#E5C07B",
+        "base.yellow.light": "#F0D4A0",
+        "base.magenta": "#C678DD",
+        "base.magenta.light": "#D9A0EA",
+        "base.cyan": "#56B6C2",
+        "base.cyan.light": "#7ECBD4"
+      }
+    }
+  ]
+}

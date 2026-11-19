@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.env
+.env.*
+apps/gale-desktop/node_modules/
+apps/gale-desktop/dist/
+apps/gale-desktop/src-tauri/target/
