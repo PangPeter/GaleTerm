@@ -44,6 +44,17 @@ impl FrameBuffer {
     }
 }
 
+/// Soft-cursor bitmap for local overlay (VNC Cursor / XCursor).
+#[derive(Clone, Debug)]
+pub struct SoftCursor {
+    pub hotspot_x: u16,
+    pub hotspot_y: u16,
+    pub width: u16,
+    pub height: u16,
+    /// BGRA8 with alpha.
+    pub pixels: Arc<[u8]>,
+}
+
 /// Pointer / keyboard / clipboard events from the desktop pane.
 #[derive(Debug, Clone)]
 pub enum DesktopInput {
@@ -52,6 +63,8 @@ pub enum DesktopInput {
     /// X11 keysym (VNC) — RDP maps these to scancodes / unicode.
     Key { down: bool, keysym: u32 },
     CutText(String),
+    /// PNG bytes (RDP CLIPRDR image paste).
+    CutImage(Vec<u8>),
     Refresh,
     Close,
 }

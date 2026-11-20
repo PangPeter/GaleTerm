@@ -7,16 +7,27 @@ description = "RDP client for GaleTerm (Phase 3.5, IronRDP)"
 
 [dependencies]
 anyhow.workspace = true
+dirs.workspace = true
 gale-core = { path = "../gale-core" }
-ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input"] }
+ironrdp = { version = "0.17", features = ["core", "connector", "session", "graphics", "input", "cliprdr", "rdpsnd", "rdpdr"] }
 ironrdp-blocking = "0.10"
+ironrdp-cliprdr = "0.7"
+ironrdp-cliprdr-format = "0.2"
 ironrdp-input = "0.7"
+# PCM-only (no opus/cmake); xrdp typically negotiates PCM for RDPSND.
+ironrdp-rdpsnd-native = { version = "0.7", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+sha2 = "0.10"
 sspi = { version = "0.22", features = ["network_client"] }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 x509-cert = "0.2"
+
+# Drive redirection FS backend is Unix-only in IronRDP 0.17.
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+ironrdp-rdpdr-native = "0.7"
 
 [[example]]
 name = "probe"
@@ -24,6 +35,7 @@ path = "examples/probe.rs"
 
 [dev-dependencies]
 anyhow.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [lints]
 workspace = true

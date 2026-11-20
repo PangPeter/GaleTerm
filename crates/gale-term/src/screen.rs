@@ -36,6 +36,21 @@ pub struct InputModes {
     /// Full-screen app on the alternate screen: the wheel should send arrow
     /// keys instead of scrolling history.
     pub alternate_scroll: bool,
+    /// CSI ? 1000 h — report mouse clicks.
+    pub mouse_click: bool,
+    /// CSI ? 1002 h — report drag while button held (implies click).
+    pub mouse_drag: bool,
+    /// CSI ? 1003 h — report all mouse motion.
+    pub mouse_motion: bool,
+    /// CSI ? 1006 h — SGR extended mouse encoding.
+    pub sgr_mouse: bool,
+}
+
+impl InputModes {
+    /// Any mouse reporting mode is active (1000 / 1002 / 1003).
+    pub fn mouse_reporting(&self) -> bool {
+        self.mouse_click || self.mouse_drag || self.mouse_motion
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +156,10 @@ impl TerminalEmulator {
             app_cursor: mode.contains(TermMode::APP_CURSOR),
             bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
             alternate_scroll: mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL),
+            mouse_click: mode.contains(TermMode::MOUSE_REPORT_CLICK),
+            mouse_drag: mode.contains(TermMode::MOUSE_DRAG),
+            mouse_motion: mode.contains(TermMode::MOUSE_MOTION),
+            sgr_mouse: mode.contains(TermMode::SGR_MOUSE),
         }
     }
 
@@ -348,9 +367,22 @@ mod tests {
                 app_cursor: true,
                 bracketed_paste: true,
                 alternate_scroll: false,
+                ..InputModes::default()
             }
         );
         term.process(b"\x1b[?1l\x1b[?2004l");
         assert_eq!(term.input_modes(), InputModes::default());
+    }
+
+    #[test]
+    fn input_modes_track_mouse_sgr() {
+        let mut term = TerminalEmulator::new(20, 5);
+        term.process(b"\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+        let modes = term.input_modes();
+        // 1002 replaces 1000 in alacritty's TermMode.
+        assert!(modes.mouse_drag || modes.mouse_click);
+        assert!(modes.sgr_mouse);
+        term.process(b"\x1b[?1000l\x1b[?1002l\x1b[?1006l");
+        assert!(!term.input_modes().mouse_reporting());
     }
 }

@@ -32,6 +32,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     break;
                 }
             }
+            VncOutput::Cursor(Some(c)) => {
+                println!(
+                    "cursor {}x{} hotspot=({},{})",
+                    c.width, c.height, c.hotspot_x, c.hotspot_y
+                );
+            }
+            VncOutput::Cursor(None) => println!("cursor hide"),
             VncOutput::Bell => println!("bell"),
             VncOutput::CutText(t) => println!("cut: {t:?}"),
         }

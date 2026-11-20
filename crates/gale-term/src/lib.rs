@@ -1,6 +1,7 @@
 //! Local PTY and terminal emulation (via `alacritty_terminal`).
 
 mod error;
+mod mouse;
 mod palette;
 mod pty;
 mod screen;
@@ -9,6 +10,7 @@ mod style;
 
 pub use alacritty_terminal;
 pub use error::{Error, Result};
+pub use mouse::{encode_mouse, MouseAction, MouseButtonKind, MouseModifiers};
 pub use palette::{indexed_color, resolve_color, CellRgb, DEFAULT_BG, DEFAULT_FG};
 pub use pty::{LocalPty, PtySize};
 pub use screen::{

@@ -4,12 +4,12 @@
 
 **项目路径**：`/Users/makerv/myDisk/xgs_project/gale-term`  
 **目标**：Rust 跨平台通用终端 / SSH 客户端，功能面囊括 WindTerm（非源码 1:1）  
-**当前阶段**：Phase 3.5 进行中 — 远程桌面 MVP + 隧道 + 文本剪贴板已可；下一步缩放 / 全屏 / 重连、RDP CLIPRDR  
+**当前阶段**：Phase 3.5 远程桌面主线齐（RDP 长尾 + VNC ZRLE/本地光标）；Tight / CLIPRDR 文件 / RD Gateway 延后
 
 **本地 VNC 测试**：`docker start gale-vnc-test`（`127.0.0.1:5901`，密码 `secret`）；停用 `docker rm -f gale-vnc-test`  
 **本地 RDP 测试**：`docker start gale-rdp-test`（`127.0.0.1:3389` RDP / `2222` SSH，账号 `ubuntu`/`ubuntu`，镜像 `danielguerra/ubuntu-xrdp`；探针 `cargo run -p gale-rdp --example probe -- 127.0.0.1 3389 ubuntu ubuntu`；隧道 `cargo run -p gale-ssh --example tunnel_probe -- --ssh-host 127.0.0.1 --ssh-port 2222 --ssh-user ubuntu --ssh-password ubuntu --dest 127.0.0.1:3389`）  
 **测试机**：`makerv@192.168.55.3`（Ubuntu，OpenSSH 9.6，仅密码登录）可用于远程联调  
-**更新日期**：2026-11-19
+**更新日期**：2026-11-20
 
 ---
 
@@ -40,7 +40,7 @@
 | 桌面壳 | `apps/gale-desktop` | 进行中 | Termius X 壳：顶栏导航 / Vault 主机卡 / 全宽终端 Tab；本地 PTY + 远程会话（`remote_session.rs`，独立 tokio 运行时） |
 | 会话通道 I/O | `gale-core::SessionInput` + 各协议 `run_channels` | 完成 | SSH / Telnet / TCP / Serial 统一「输入/尺寸/关闭 → 输出字节」通道；`SecretPrompt` 让 GUI 接管密码与私钥口令 |
 | UI 基调 | `docs/UI.md` + `themes/gale-termius.json` | 已定 | 柔和深色；紫主色；圆角抬升；Forge JSON 保留备选 |
-| 终端视图 | `crates/gale-term-view` | 进行中 | canvas 按格自绘（16/256/truecolor、粗斜体/下划线/反显、CJK 两格）；光标（块/竖线/下划线，失焦空心）；鼠标选区复制；滚轮回看；待 damage 增量、鼠标上报（vim `mouse=a` / tmux） |
+| 终端视图 | `crates/gale-term-view` | 进行中 | canvas 按格自绘（16/256/truecolor、粗斜体/下划线/反显、CJK 两格）；光标（块/竖线/下划线，失焦空心）；鼠标选区复制；滚轮回看；**鼠标上报**（SGR/X10，1000/1002/1003）；待 damage 增量 |
 | 多语言 | `gale-desktop` | 进行中 | `en` / `zh-CN`；跟随系统或手动；`locales/ui.yml` |
 
 ### 快速验证
@@ -92,6 +92,7 @@ Phase 2 可选长尾（不阻塞 Phase 3）：ProxyCommand、ControlMaster、ZMo
 7. ~~桌面内从 Vault 连接 SSH / Telnet / TCP / Serial~~ ✅（主机卡 / 搜索框快速连接；GUI 指纹确认 + 密码/口令弹窗；ProxyJump 链）  
 8. ~~完整菜单 / 命令面板（Cmd+K）~~ ✅（`menus.rs` 原生菜单 + 快捷键；`app/palette.rs` 搜主机/标签页/命令/`user@host`；终端粘贴含 bracketed paste、DECCKM 方向键）  
 9. ~~`gale-term-view` 光标 + 选中复制 + 滚动回看~~ ✅（`ScreenSnapshot` 按列定位、宽字符占 2 格；canvas 自绘 + `force_width` 对齐网格；alacritty `Selection` 单/双/三击；⌘C/⌘V；滚轮回看，备用屏转方向键）。真正的 damage 增量重绘仍待做（目前每帧整屏快照，输出按帧合并）  
+    - ~~鼠标上报~~ ✅（读 `TermMode` 1000/1002/1003 + 1006 SGR；`gale_term::encode_mouse`；Shift 仍本地选区；滚轮在 mouse mode 下发 64/65）  
 10. ~~双栏文件管理器（左本地 \| 右远程）~~ ✅  
     - ~~SFTP 双栏~~ ✅（`apps/gale-desktop/src/files.rs` + `files/backend.rs` 的 `Backend{Local,Sftp}`；选主机/`user@host` 连接、复用 GUI 弹窗与跳板链；双击进目录/传文件、⌘/Shift 多选、两栏拖拽、Finder 拖入上传；新建文件夹/重命名/删除确认/同名替换确认；传输队列带进度与取消；`SftpClient::*_with_progress` 已在测试机实测）  
     - ~~FTP / FTPS~~ ✅（`gale-ftp` 作为 `Backend::Ftp` 接入；`ftp://`、`ftps://`、`ftp user@host` 快速连接；明文 FTP 在远程栏标“未加密”；证书确认复用主机指纹弹窗）  
@@ -106,13 +107,24 @@ Phase 2 可选长尾（不阻塞 Phase 3）：ProxyCommand、ControlMaster、ZMo
 ### 紧随：Phase 3.5（RDP / VNC）
 
 1. ~~`gale-vnc`：RFB MVP → gpui 帧显示 + 键鼠~~ ✅（`crates/gale-vnc`：RFB 3.8、VNC DES 密码认证、Raw/CopyRect、BGRA 帧缓冲；`crates/gale-desktop-view` 绘制 + 键鼠；桌面 `vnc://` / 主机卡开 Tab；钥匙串复用；Docker `dorowu/ubuntu-desktop-lxde-vnc` 于 `127.0.0.1:5901` 实测握手与出帧）  
-   - **后续（VNC）**：ZRLE/Tight、本地光标、剪贴板双向、缩放/全屏  
+   - ~~ZRLE~~ ✅（`ENC_ZRLE=16`；连接级 zlib 流 + 64×64 tile；协商 `CopyRect > ZRLE > Raw`；`GALE_VNC_ZRLE_ONLY=1` 可对 x11vnc 实测）  
+   - ~~本地光标~~ ✅（Cursor `-239` + XCursor `-240`；`DesktopPane` 叠加绘制；x11vnc 实测出 `10x16` shape。系统光标暂仍 Arrow——gpui 无 Invisible，双光标可接受为已知限制）  
+   - **后续（VNC）**：Tight、隐藏系统光标、完整 CLIPBOARD（已有 CutText）
 2. ~~`gale-rdp`：IronRDP → 同一桌面视图管线~~ ✅（`crates/gale-rdp`：IronRDP 0.17 + blocking I/O；TLS+CredSSP/NLA；BGRA 帧；键鼠经 `ironrdp-input`；桌面 `rdp://user@host` / 主机卡开 Tab；钥匙串 `rdp://…`；Docker xrdp `127.0.0.1:3389` 探针已出帧；workspace `[patch]` 对齐 `ironrdp-connector` 的 picky/sspi 以与 `russh` 共存，见 `vendor/ironrdp-connector` / [IronRDP#1363](https://github.com/Devolutions/IronRDP/issues/1363)）  
-   - **后续（RDP）**：证书校验弹窗（现 MVP 接受任意 TLS 证书）、网关、驱动器/剪贴板重定向、音频  
+   - **后续（RDP，延后）**  
+     - **CLIPRDR 文件**：协议（cliprdr 0.7 FileGroupDescriptorW / FileContents）已齐，但需能力协商 + 分块状态机；gpui macOS 不能把文件写回系统剪贴板；传文件主路径已由 RDPDR 沙箱盘覆盖  
+     - **RD Gateway**：IronRDP `mstsgu` 0.0.1 仅异步 WebSocket + Basic，与 gale-rdp blocking 不兼容；企业网关常需 NTLM → 等 IronRDP 升级 + 异步化。可达性继续用已有 SSH `jump_session_id`
 3. ~~经 SSH 隧道 / ProxyJump 一键连远程桌面~~ ✅（`gale_ssh::open_local_tunnel`：跳板 SSH 含其 ProxyJump 链 → `127.0.0.1:ephemeral` LocalForward；VNC/RDP `dial` 走隧道，逻辑主机名仍用于钥匙串 / RDP SNI；桌面读会话 `jump_session_id`；Docker `2222→ssh` + `3389→rdp` 经隧道出帧实测）  
 4. 剪贴板 / 全屏 / 缩放 / 重连  
-   - ~~文本剪贴板~~ ✅（VNC：`ServerCutText` → 系统剪贴板；⌘V/`Paste` → `ClientCutText` + Ctrl+V。RDP：⌘V 按 US-QWERTY scancode 逐字键入（xrdp 常忽略 Unicode）；完整 CLIPRDR 双向仍待做）  
-   - **待做**：缩放 / 全屏适配、断线重连、RDP CLIPRDR 通道  
+   - ~~文本剪贴板~~ ✅（VNC：`ServerCutText` → 系统剪贴板；⌘V/`Paste` → `ClientCutText` + Ctrl+V。RDP：`ironrdp-cliprdr` 文本 CLIPRDR 双向；⌘V 先 advertise + Ctrl+V，失败回退 scancode）  
+   - ~~缩放 / 全屏适配~~ ✅（`DesktopScaleMode`：Fit 默认 letterbox、Native 1:1、Stretch；右下角 HUD；菜单 / 命令面板 / ⌘0 循环、⌘1/2/3；窗口全屏沿用 ⌃⌘F）  
+   - ~~断线重连~~ ✅（断线遮罩 + 点击/`⌘R`/菜单/命令面板；`RemoteDesktopTab::reconnect` 复用同一 pane；`session_alive` 防止旧会话回调冲掉新连接）  
+   - ~~RDP TLS 证书确认~~ ✅（系统根证书优先；失败则指纹 TOFU → 复用 FTPS 弹窗；`rdp_known_certs` 持久化；探针 `AcceptOnce`）  
+   - ~~RDP CLIPRDR（文本）~~ ✅（`GaleCliprdrBackend` + `CliprdrClient` 静态通道；远端复制 → 系统剪贴板；本地粘贴 → FormatList + Ctrl+V）  
+   - ~~RDP CLIPRDR（图片）~~ ✅（`CF_DIB`/`CF_DIBV5` ↔ PNG via `ironrdp-cliprdr-format`；远端复制 → 系统剪贴板 Image；本地 ⌘V 优先 PNG → FormatList + Ctrl+V；VNC 无标准图片剪贴板，忽略）  
+   - ~~RDP 音频（RDPSND）~~ ✅（`enable_audio_playback` + 静态 `Rdpsnd` + `ironrdp-rdpsnd-native` cpal；PCM-only，关 opus 以免 cmake；ActiveStage 自动处理 Wave2）  
+   - ~~RDP 驱动器重定向（RDPDR）~~ ✅（macOS/Linux：`ironrdp-rdpdr-native` `NixRdpdrBackend`；默认共享 `~/Library/Application Support/gale-term/rdp-share`（或 XDG data），远端显示为 `Gale on GaleTerm`；xrdp 侧常见挂载点 `~/thinclient_drives`）  
+   - ~~xrdp 未知 RDPSND PDU 不断开~~ ✅（IronRDP 0.9 遇 `msgType=0x27` 等会 `[payload error] PDU error`；会话循环改为 warn 后继续，避免整 Tab 掉线）
 
 
 详细见 [`docs/ROADMAP.md`](docs/ROADMAP.md)「Phase 3.5」。
@@ -187,7 +199,7 @@ gale-term/
 ## 7. 远程桌面备忘（RDP / VNC）
 
 - **已写入方案**：是（ROADMAP Phase 3.5 + ARCHITECTURE crate 规划）
-- **实现状态**：VNC MVP + RDP MVP 均已接入桌面 Tab；SSH 隧道 / 剪贴板 / 缩放仍待做
+- **实现状态**：VNC MVP + RDP MVP 均已接入桌面 Tab；SSH 隧道 / 缩放 / 重连 / TLS TOFU / CLIPRDR 文本+图片 / RDPSND / RDPDR 已通；CLIPRDR 文件与 RD Gateway 延后
 - **为何不放 Phase 2**：需要图形窗口；CLI 无法提供完整体验
 - **为何不阻塞 Phase 3 主线**：先把终端 Tab / 会话树跑通，再接帧缓冲视图
 - **许可**：只用 MIT/Apache；RDP 用 IronRDP；禁止 GPL 客户端核心

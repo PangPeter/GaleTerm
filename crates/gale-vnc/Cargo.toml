@@ -8,6 +8,7 @@ description = "VNC / RFB client for GaleTerm (Phase 3.5)"
 [dependencies]
 cipher = "0.4"
 des = "0.8"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 gale-core = { path = "../gale-core" }
 thiserror.workspace = true
 tokio.workspace = true

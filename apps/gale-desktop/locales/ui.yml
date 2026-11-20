@@ -196,6 +196,21 @@ app:
   cmd_refresh:
     en: Reload Hosts
     zh-CN: 重新载入主机
+  cmd_desktop_scale_fit:
+    en: Desktop Scale — Fit
+    zh-CN: 远程桌面缩放 — 适应窗口
+  cmd_desktop_scale_native:
+    en: Desktop Scale — Actual Size
+    zh-CN: 远程桌面缩放 — 实际大小
+  cmd_desktop_scale_stretch:
+    en: Desktop Scale — Stretch
+    zh-CN: 远程桌面缩放 — 拉伸
+  cmd_desktop_scale_cycle:
+    en: Cycle Desktop Scale
+    zh-CN: 循环远程桌面缩放
+  cmd_reconnect_desktop:
+    en: Reconnect Desktop
+    zh-CN: 重新连接远程桌面
   cmd_fullscreen:
     en: Toggle Full Screen
     zh-CN: 切换全屏

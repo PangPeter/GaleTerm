@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gale_core::vault::CredentialKey;
-use gale_rdp::{RdpClientConfig, RdpInput, RdpOutput, RdpPrompt, RdpSession};
+use gale_rdp::{
+    RdpCertDecision, RdpCertInfo, RdpClientConfig, RdpInput, RdpOutput, RdpPrompt, RdpSession,
+};
 use tokio::sync::mpsc;
 
 struct EnvPrompt;
@@ -22,10 +24,23 @@ impl RdpPrompt for EnvPrompt {
     fn saved_credential(&self, _: &CredentialKey) -> Option<String> {
         None
     }
+
+    fn confirm_certificate(&self, info: &RdpCertInfo) -> RdpCertDecision {
+        eprintln!(
+            "accepting untrusted cert for {}:{} ({})",
+            info.host, info.port, info.fingerprint
+        );
+        RdpCertDecision::AcceptOnce
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .try_init();
+
     let mut args = env::args().skip(1);
     let host = args.next().unwrap_or_else(|| "127.0.0.1".into());
     let port: u16 = args
@@ -79,7 +94,15 @@ async fn main() -> anyhow::Result<()> {
                     frame.width, frame.height
                 );
                 got_frame = true;
-                break;
+                // Hold so post-logon channels (RDPDR announce) can surface PDU errors.
+                let hold: u64 = env::var("HOLD_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                if hold == 0 {
+                    break;
+                }
+                println!("holding {hold}s for channel PDUs…");
             }
             Ok(Some(RdpOutput::CutText(t))) if t.starts_with("error:") => {
                 anyhow::bail!("{}", t.trim_start_matches("error:"));

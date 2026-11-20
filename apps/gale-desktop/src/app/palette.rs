@@ -67,10 +67,15 @@ enum Command {
     NextTab,
     PrevTab,
     FullScreen,
+    DesktopScaleFit,
+    DesktopScaleNative,
+    DesktopScaleStretch,
+    CycleDesktopScale,
+    ReconnectDesktop,
 }
 
 impl Command {
-    const ALL: [Command; 9] = [
+    const ALL: [Command; 14] = [
         Self::NewLocal,
         Self::Vault,
         Self::Sftp,
@@ -80,6 +85,11 @@ impl Command {
         Self::NextTab,
         Self::PrevTab,
         Self::FullScreen,
+        Self::DesktopScaleFit,
+        Self::DesktopScaleNative,
+        Self::DesktopScaleStretch,
+        Self::CycleDesktopScale,
+        Self::ReconnectDesktop,
     ];
 
     fn label_key(self) -> &'static str {
@@ -93,6 +103,11 @@ impl Command {
             Self::NextTab => "app.cmd_next_tab",
             Self::PrevTab => "app.cmd_prev_tab",
             Self::FullScreen => "app.cmd_fullscreen",
+            Self::DesktopScaleFit => "app.cmd_desktop_scale_fit",
+            Self::DesktopScaleNative => "app.cmd_desktop_scale_native",
+            Self::DesktopScaleStretch => "app.cmd_desktop_scale_stretch",
+            Self::CycleDesktopScale => "app.cmd_desktop_scale_cycle",
+            Self::ReconnectDesktop => "app.cmd_reconnect_desktop",
         }
     }
 
@@ -102,11 +117,15 @@ impl Command {
             Self::Vault => IconName::LayoutDashboard,
             Self::Sftp => IconName::Folder,
             Self::Settings => IconName::Settings,
-            Self::Refresh => IconName::RefreshCw,
+            Self::Refresh | Self::ReconnectDesktop => IconName::RefreshCw,
             Self::CloseTab => IconName::Close,
             Self::NextTab => IconName::ChevronRight,
             Self::PrevTab => IconName::ChevronLeft,
             Self::FullScreen => IconName::Maximize,
+            Self::DesktopScaleFit
+            | Self::DesktopScaleNative
+            | Self::DesktopScaleStretch
+            | Self::CycleDesktopScale => IconName::Maximize,
         }
     }
 
@@ -119,6 +138,11 @@ impl Command {
             Self::NextTab => "Ctrl+Tab",
             Self::PrevTab => "Ctrl+Shift+Tab",
             Self::FullScreen if mac => "⌃⌘F",
+            Self::CycleDesktopScale => if mac { "⌘0" } else { "Ctrl+Shift+0" },
+            Self::DesktopScaleFit => if mac { "⌘1" } else { "Ctrl+Shift+1" },
+            Self::DesktopScaleNative => if mac { "⌘2" } else { "Ctrl+Shift+2" },
+            Self::DesktopScaleStretch => if mac { "⌘3" } else { "Ctrl+Shift+3" },
+            Self::ReconnectDesktop => if mac { "⌘R" } else { "Ctrl+Shift+R" },
             _ => return None,
         })
     }
@@ -210,6 +234,25 @@ impl GaleApp {
                 Command::FullScreen => {
                     window.toggle_fullscreen();
                     self.restore_focus(window, cx);
+                }
+                Command::DesktopScaleFit => {
+                    self.set_desktop_scale(gale_desktop_view::DesktopScaleMode::Fit, cx);
+                    self.restore_focus(window, cx);
+                }
+                Command::DesktopScaleNative => {
+                    self.set_desktop_scale(gale_desktop_view::DesktopScaleMode::Native, cx);
+                    self.restore_focus(window, cx);
+                }
+                Command::DesktopScaleStretch => {
+                    self.set_desktop_scale(gale_desktop_view::DesktopScaleMode::Stretch, cx);
+                    self.restore_focus(window, cx);
+                }
+                Command::CycleDesktopScale => {
+                    self.with_active_desktop_pane(cx, |pane, cx| pane.cycle_scale_mode(cx));
+                    self.restore_focus(window, cx);
+                }
+                Command::ReconnectDesktop => {
+                    self.reconnect_active_desktop(window, cx);
                 }
             },
         }

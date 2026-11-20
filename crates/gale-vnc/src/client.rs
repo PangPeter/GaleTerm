@@ -9,8 +9,10 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
 use crate::auth::encrypt_challenge;
+use crate::cursor::{decode_rich_cursor, decode_xcursor, CursorShape};
 use crate::error::{Error, Result};
 use crate::pixel::{decode_pixels, PixelFormat};
+use crate::zrle::ZrleDecoder;
 
 const RFB_VERSION: &[u8] = b"RFB 003.008\n";
 const SEC_INVALID: u8 = 0;
@@ -18,6 +20,9 @@ const SEC_NONE: u8 = 1;
 const SEC_VNC: u8 = 2;
 const ENC_RAW: i32 = 0;
 const ENC_COPY_RECT: i32 = 1;
+const ENC_ZRLE: i32 = 16;
+const ENC_CURSOR: i32 = -239;
+const ENC_XCURSOR: i32 = -240;
 
 /// Asks for the VNC password when none is configured.
 pub trait VncPrompt: Send + Sync {
@@ -131,6 +136,8 @@ pub enum VncOutput {
         name: String,
     },
     Frame(FrameBuffer),
+    /// Soft-cursor shape from Cursor / XCursor pseudo-encoding (`None` = hide).
+    Cursor(Option<CursorShape>),
     Bell,
     CutText(String),
 }
@@ -140,6 +147,8 @@ struct Conn {
     format: PixelFormat,
     frame: FrameBuffer,
     name: String,
+    /// Connection-long zlib inflater for ZRLE (RFC 6143).
+    zrle: ZrleDecoder,
 }
 
 impl Conn {
@@ -181,11 +190,26 @@ impl Conn {
             format,
             frame: FrameBuffer::new(width, height),
             name,
+            zrle: ZrleDecoder::new(),
         };
         // Ask for a format we can paint without conversion surprises.
         conn.set_pixel_format(PixelFormat::RGB888_LE).await?;
         conn.format = PixelFormat::RGB888_LE;
-        conn.set_encodings(&[ENC_COPY_RECT, ENC_RAW]).await?;
+        // Local cursor first so the server stops painting the pointer into the FB.
+        // Prefer CopyRect / ZRLE; keep Raw as fallback.
+        // `GALE_VNC_ZRLE_ONLY=1` forces ZRLE (no Raw) for probe verification.
+        let encodings = if std::env::var_os("GALE_VNC_ZRLE_ONLY").is_some() {
+            &[ENC_CURSOR, ENC_XCURSOR, ENC_ZRLE][..]
+        } else {
+            &[
+                ENC_CURSOR,
+                ENC_XCURSOR,
+                ENC_COPY_RECT,
+                ENC_ZRLE,
+                ENC_RAW,
+            ][..]
+        };
+        conn.set_encodings(encodings).await?;
         conn.request_update(false).await?;
         Ok(conn)
     }
@@ -253,7 +277,8 @@ impl Conn {
         Ok(())
     }
 
-    async fn handle_server_message(&mut self) -> Result<Option<VncOutput>> {
+    /// Returns `(outputs, request_incremental)`.
+    async fn handle_server_message(&mut self) -> Result<(Vec<VncOutput>, bool)> {
         let mut kind = [0u8; 1];
         match self.stream.read_exact(&mut kind).await {
             Ok(_) => {}
@@ -264,8 +289,8 @@ impl Conn {
         }
         match kind[0] {
             0 => {
-                self.read_framebuffer_update().await?;
-                Ok(Some(VncOutput::Frame(self.frame.clone())))
+                let outs = self.read_framebuffer_update().await?;
+                Ok((outs, true))
             }
             1 => {
                 // SetColourMapEntries — ignore after our true-colour format.
@@ -276,9 +301,9 @@ impl Conn {
                 if !skip.is_empty() {
                     self.stream.read_exact(&mut skip).await?;
                 }
-                Ok(None)
+                Ok((Vec::new(), false))
             }
-            2 => Ok(Some(VncOutput::Bell)),
+            2 => Ok((vec![VncOutput::Bell], false)),
             3 => {
                 let mut hdr = [0u8; 7];
                 self.stream.read_exact(&mut hdr).await?;
@@ -287,18 +312,23 @@ impl Conn {
                 if len > 0 {
                     self.stream.read_exact(&mut text).await?;
                 }
-                Ok(Some(VncOutput::CutText(
-                    String::from_utf8_lossy(&text).into_owned(),
-                )))
+                Ok((
+                    vec![VncOutput::CutText(
+                        String::from_utf8_lossy(&text).into_owned(),
+                    )],
+                    false,
+                ))
             }
             other => Err(Error::Protocol(format!("unknown server message {other}"))),
         }
     }
 
-    async fn read_framebuffer_update(&mut self) -> Result<()> {
+    async fn read_framebuffer_update(&mut self) -> Result<Vec<VncOutput>> {
         let mut hdr = [0u8; 3];
         self.stream.read_exact(&mut hdr).await?;
         let count = u16::from_be_bytes([hdr[1], hdr[2]]) as usize;
+        let mut outs = Vec::new();
+        let mut painted = false;
         for _ in 0..count {
             let mut rh = [0u8; 12];
             self.stream.read_exact(&mut rh).await?;
@@ -308,14 +338,104 @@ impl Conn {
             let h = u16::from_be_bytes([rh[6], rh[7]]);
             let encoding = i32::from_be_bytes([rh[8], rh[9], rh[10], rh[11]]);
             match encoding {
-                ENC_RAW => self.decode_raw(x, y, w, h).await?,
-                ENC_COPY_RECT => self.decode_copy_rect(x, y, w, h).await?,
+                ENC_RAW => {
+                    self.decode_raw(x, y, w, h).await?;
+                    painted = true;
+                }
+                ENC_COPY_RECT => {
+                    self.decode_copy_rect(x, y, w, h).await?;
+                    painted = true;
+                }
+                ENC_ZRLE => {
+                    self.decode_zrle(x, y, w, h).await?;
+                    painted = true;
+                }
+                ENC_CURSOR => {
+                    let shape = self.decode_cursor_shape(x, y, w, h).await?;
+                    outs.push(VncOutput::Cursor(shape));
+                }
+                ENC_XCURSOR => {
+                    let shape = self.decode_xcursor_shape(x, y, w, h).await?;
+                    outs.push(VncOutput::Cursor(shape));
+                }
                 other => {
                     return Err(Error::Protocol(format!("unsupported encoding {other}")));
                 }
             }
         }
-        Ok(())
+        if painted {
+            outs.push(VncOutput::Frame(self.frame.clone()));
+        }
+        Ok(outs)
+    }
+
+    async fn decode_cursor_shape(
+        &mut self,
+        hotspot_x: u16,
+        hotspot_y: u16,
+        w: u16,
+        h: u16,
+    ) -> Result<Option<CursorShape>> {
+        if w == 0 || h == 0 {
+            return Ok(None);
+        }
+        let bpp = self.format.bytes_per_pixel();
+        let pix_len = w as usize * h as usize * bpp;
+        let mut pixels = vec![0u8; pix_len];
+        if pix_len > 0 {
+            self.stream.read_exact(&mut pixels).await?;
+        }
+        let mask_bytes = (w as usize).div_ceil(8) * h as usize;
+        let mut mask = vec![0u8; mask_bytes];
+        if mask_bytes > 0 {
+            self.stream.read_exact(&mut mask).await?;
+        }
+        let shape = decode_rich_cursor(
+            self.format,
+            hotspot_x,
+            hotspot_y,
+            w,
+            h,
+            &pixels,
+            &mask,
+        )?;
+        Ok(if shape.is_empty() {
+            None
+        } else {
+            Some(shape)
+        })
+    }
+
+    async fn decode_xcursor_shape(
+        &mut self,
+        hotspot_x: u16,
+        hotspot_y: u16,
+        w: u16,
+        h: u16,
+    ) -> Result<Option<CursorShape>> {
+        if w == 0 || h == 0 {
+            // Still need to read colours? Empty cursor may omit body — servers
+            // usually send w=h=0 with no payload.
+            return Ok(None);
+        }
+        let mut colors = [0u8; 6];
+        self.stream.read_exact(&mut colors).await?;
+        let fore = [colors[0], colors[1], colors[2]];
+        let back = [colors[3], colors[4], colors[5]];
+        let row_bytes = (w as usize).div_ceil(8);
+        let plane = row_bytes * h as usize;
+        let mut bitmap = vec![0u8; plane];
+        let mut mask = vec![0u8; plane];
+        if plane > 0 {
+            self.stream.read_exact(&mut bitmap).await?;
+            self.stream.read_exact(&mut mask).await?;
+        }
+        let shape = decode_xcursor(hotspot_x, hotspot_y, w, h, fore, back, &bitmap, &mask)?;
+        Ok(if shape.is_empty() {
+            None
+        } else {
+            Some(shape)
+        })
     }
 
     async fn decode_raw(&mut self, x: u16, y: u16, w: u16, h: u16) -> Result<()> {
@@ -362,6 +482,19 @@ impl Conn {
             pixels[d..d + dw * 4].copy_from_slice(&block[s..s + dw * 4]);
         }
         Ok(())
+    }
+
+    async fn decode_zrle(&mut self, x: u16, y: u16, w: u16, h: u16) -> Result<()> {
+        let mut len_buf = [0u8; 4];
+        self.stream.read_exact(&mut len_buf).await?;
+        let len = u32::from_be_bytes(len_buf) as usize;
+        let mut compressed = vec![0u8; len];
+        if len > 0 {
+            self.stream.read_exact(&mut compressed).await?;
+        }
+        let fw = self.frame.width;
+        let pixels = self.frame.pixels_mut();
+        self.zrle.decode_rect(&compressed, x, y, w, h, fw, pixels)
     }
 }
 
@@ -488,17 +621,14 @@ impl VncSession {
         loop {
             tokio::select! {
                 msg = self.conn.handle_server_message() => {
-                    match msg? {
-                        Some(out) => {
-                            let is_frame = matches!(out, VncOutput::Frame(_));
-                            if output.send(out).is_err() {
-                                return Ok(());
-                            }
-                            if is_frame {
-                                self.conn.request_update(true).await?;
-                            }
+                    let (outs, request_more) = msg?;
+                    for out in outs {
+                        if output.send(out).is_err() {
+                            return Ok(());
                         }
-                        None => {}
+                    }
+                    if request_more {
+                        self.conn.request_update(true).await?;
                     }
                 }
                 event = input.recv() => {

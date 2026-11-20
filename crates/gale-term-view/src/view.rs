@@ -3,8 +3,9 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use gale_term::{
-    CellRgb, CellStyle, CursorShape, CursorSnapshot, GridRun, InputModes, ScreenSnapshot,
-    SelectionKind, TerminalEmulator, TerminalEvent, DEFAULT_BG, DEFAULT_FG,
+    encode_mouse, CellRgb, CellStyle, CursorShape, CursorSnapshot, GridRun, InputModes,
+    MouseAction, MouseButtonKind, MouseModifiers, ScreenSnapshot, SelectionKind, TerminalEmulator,
+    TerminalEvent, DEFAULT_BG, DEFAULT_FG,
 };
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
@@ -55,6 +56,8 @@ pub struct TerminalPane {
     focus: Option<FocusHandle>,
     layout: Rc<Cell<Option<GridLayout>>>,
     selecting: bool,
+    /// Button held for mouse-report drag (1002), if any.
+    report_button: Option<MouseButtonKind>,
     /// Fractional wheel lines carried between events (trackpads).
     scroll_remainder: f32,
 }
@@ -75,6 +78,7 @@ impl TerminalPane {
             focus: None,
             layout: Rc::new(Cell::new(None)),
             selecting: false,
+            report_button: None,
             scroll_remainder: 0.,
         }
     }
@@ -186,10 +190,56 @@ impl TerminalPane {
         Some((col, row, x.fract() >= 0.5))
     }
 
+    fn mouse_mods(ev_shift: bool, ev_alt: bool, ev_ctrl: bool) -> MouseModifiers {
+        MouseModifiers {
+            shift: ev_shift,
+            alt: ev_alt,
+            ctrl: ev_ctrl,
+        }
+    }
+
+    fn report_mouse(
+        &self,
+        action: MouseAction,
+        button: Option<MouseButtonKind>,
+        col: usize,
+        row: usize,
+        mods: MouseModifiers,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let modes = self.input_modes();
+        let Some(bytes) = encode_mouse(modes, action, button, col, row, mods) else {
+            return false;
+        };
+        cx.emit(TerminalPaneEvent::Output(bytes));
+        true
+    }
+
     fn on_mouse_down(&mut self, ev: &MouseDownEvent, cx: &mut Context<Self>) {
         let Some((col, row, right)) = self.cell_at(ev.position) else {
             return;
         };
+        let button = match ev.button {
+            MouseButton::Left => MouseButtonKind::Left,
+            MouseButton::Middle => MouseButtonKind::Middle,
+            MouseButton::Right => MouseButtonKind::Right,
+            _ => return,
+        };
+        let modes = self.input_modes();
+        let mods = Self::mouse_mods(ev.modifiers.shift, ev.modifiers.alt, ev.modifiers.control);
+
+        // Mouse reporting (unless Shift forces local selection).
+        if modes.mouse_reporting() && !ev.modifiers.shift {
+            self.report_button = Some(button);
+            self.selecting = false;
+            self.report_mouse(MouseAction::Press, Some(button), col, row, mods, cx);
+            return;
+        }
+
+        // Local selection (left button only).
+        if !matches!(ev.button, MouseButton::Left) {
+            return;
+        }
         let kind = match ev.click_count {
             0 | 1 => SelectionKind::Simple,
             2 => SelectionKind::Word,
@@ -203,21 +253,55 @@ impl TerminalPane {
             }
         });
         self.selecting = true;
+        self.report_button = None;
         cx.notify();
     }
 
     fn on_mouse_move(&mut self, ev: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some((col, row, right)) = self.cell_at(ev.position) else {
+            return;
+        };
+        let modes = self.input_modes();
+        let mods = Self::mouse_mods(ev.modifiers.shift, ev.modifiers.alt, ev.modifiers.control);
+
+        if modes.mouse_reporting() && !ev.modifiers.shift {
+            let held = self.report_button;
+            if modes.mouse_motion || (modes.mouse_drag && held.is_some()) {
+                self.report_mouse(MouseAction::Motion, held, col, row, mods, cx);
+            }
+            return;
+        }
+
         if !self.selecting || ev.pressed_button != Some(MouseButton::Left) {
             return;
         }
-        if let Some((col, row, right)) = self.cell_at(ev.position) {
-            self.with_term_mut(|term| term.update_selection(col, row, right));
-            cx.notify();
-        }
+        self.with_term_mut(|term| term.update_selection(col, row, right));
+        cx.notify();
     }
 
-    fn on_mouse_up(&mut self, cx: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, ev: &MouseUpEvent, cx: &mut Context<Self>) {
+        let button = match ev.button {
+            MouseButton::Left => MouseButtonKind::Left,
+            MouseButton::Middle => MouseButtonKind::Middle,
+            MouseButton::Right => MouseButtonKind::Right,
+            _ => {
+                self.selecting = false;
+                return;
+            }
+        };
+        let modes = self.input_modes();
+        let mods = Self::mouse_mods(ev.modifiers.shift, ev.modifiers.alt, ev.modifiers.control);
+
+        if modes.mouse_reporting() && !ev.modifiers.shift {
+            if let Some((col, row, _)) = self.cell_at(ev.position) {
+                self.report_mouse(MouseAction::Release, Some(button), col, row, mods, cx);
+            }
+            self.report_button = None;
+            return;
+        }
+
         self.selecting = false;
+        self.report_button = None;
         self.with_term_mut(|term| {
             if !term.has_selection() {
                 term.clear_selection();
@@ -238,6 +322,22 @@ impl TerminalPane {
         self.scroll_remainder -= lines as f32;
 
         let modes = self.input_modes();
+        let mods = Self::mouse_mods(ev.modifiers.shift, ev.modifiers.alt, ev.modifiers.control);
+
+        // Mouse mode: report wheel as buttons 64/65 (prefer over alternate_scroll).
+        if modes.mouse_reporting() && !ev.modifiers.shift {
+            let (col, row, _) = self.cell_at(ev.position).unwrap_or((0, 0, false));
+            let wheel = if lines > 0 {
+                MouseButtonKind::WheelUp
+            } else {
+                MouseButtonKind::WheelDown
+            };
+            for _ in 0..lines.unsigned_abs() {
+                self.report_mouse(MouseAction::Press, Some(wheel), col, row, mods, cx);
+            }
+            return;
+        }
+
         if modes.alternate_scroll {
             let key: &[u8] = match (lines > 0, modes.app_cursor) {
                 (true, true) => b"\x1bOA",
@@ -449,12 +549,28 @@ impl Render for TerminalPane {
                         MouseButton::Left,
                         cx.listener(|this, ev: &MouseDownEvent, _, cx| this.on_mouse_down(ev, cx)),
                     )
+                    .on_mouse_down(
+                        MouseButton::Middle,
+                        cx.listener(|this, ev: &MouseDownEvent, _, cx| this.on_mouse_down(ev, cx)),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|this, ev: &MouseDownEvent, _, cx| this.on_mouse_down(ev, cx)),
+                    )
                     .on_mouse_move(
                         cx.listener(|this, ev: &MouseMoveEvent, _, cx| this.on_mouse_move(ev, cx)),
                     )
                     .on_mouse_up(
                         MouseButton::Left,
-                        cx.listener(|this, _: &MouseUpEvent, _, cx| this.on_mouse_up(cx)),
+                        cx.listener(|this, ev: &MouseUpEvent, _, cx| this.on_mouse_up(ev, cx)),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Middle,
+                        cx.listener(|this, ev: &MouseUpEvent, _, cx| this.on_mouse_up(ev, cx)),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Right,
+                        cx.listener(|this, ev: &MouseUpEvent, _, cx| this.on_mouse_up(ev, cx)),
                     )
                     .on_scroll(
                         cx.listener(|this, ev: &ScrollEvent, _, cx| this.on_scroll(ev, cx)),

@@ -3,8 +3,10 @@
 
 mod frame;
 mod keysym;
+mod scale;
 mod view;
 
-pub use frame::{DesktopInput, FrameBuffer};
+pub use frame::{DesktopInput, FrameBuffer, SoftCursor};
 pub use keysym::keysym_from_keystroke;
+pub use scale::{layout_image, DesktopScaleMode};
 pub use view::{DesktopPane, DesktopPaneEvent};

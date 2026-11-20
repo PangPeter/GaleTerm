@@ -95,7 +95,7 @@
 
 | 协议 | MVP | 后续 |
 |------|-----|------|
-| **VNC (RFB)** | 密码认证、桌面帧渲染、键鼠、剪贴板文本 | 编码协商（Raw/ZRLE/Tight）、多显示器、文件传输（可选） |
+| **VNC (RFB)** | 密码认证、桌面帧渲染、键鼠、剪贴板文本、Raw/CopyRect/**ZRLE**、本地光标 | Tight、多显示器、文件传输（可选） |
 | **RDP** | 用户名密码、基本桌面、键鼠、剪贴板 | NLA/CredSSP、网关、驱动器重定向、音频（按优先级） |
 
 ### 架构落点
@@ -117,7 +117,11 @@
 2. ~~VNC MVP（协议更简单）→ gpui 帧显示 + 输入~~ ✅（`gale-vnc` + `gale-desktop-view`；Raw/CopyRect）  
 3. RDP MVP（IronRDP 或等价）→ 同视图管线  
 4. SSH 隧道一键：会话已有 `jump_session_id` 字段 → 本地转发自动拉起  
-5. 剪贴板、全屏、缩放、重连策略  
+5. ~~缩放 / 全屏 / 重连 / TLS 证书确认 / CLIPRDR 文本+图片~~ ✅  
+6. ~~RDP 音频（RDPSND / cpal）~~ ✅  
+7. ~~RDP 驱动器重定向（RDPDR / 沙箱目录）~~ ✅  
+8. RDP CLIPRDR 文件 — **延后**（协议齐但实现重；传文件用 RDPDR）  
+9. RD Gateway（MS-TSGU）— **延后**：依赖 IronRDP `mstsgu` 成熟 + gale-rdp 异步 transport；现阶段用 SSH jump 作堡垒可达性
 
 验收：桌面内打开 VNC/RDP Tab，可登录并键鼠操作；可经已有 SSH 会话隧道连接。
 

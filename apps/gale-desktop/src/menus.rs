@@ -22,6 +22,11 @@ actions!(
         ShowVault,
         ShowSftp,
         RefreshHosts,
+        DesktopScaleFit,
+        DesktopScaleNative,
+        DesktopScaleStretch,
+        CycleDesktopScale,
+        ReconnectDesktop,
     ]
 );
 
@@ -61,6 +66,11 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(primary!("c"), Copy, Some(TERMINAL_CONTEXT)),
         KeyBinding::new(primary!("v"), Paste, Some(DESKTOP_CONTEXT)),
         KeyBinding::new(primary!("c"), Copy, Some(DESKTOP_CONTEXT)),
+        KeyBinding::new(primary!("0"), CycleDesktopScale, Some(DESKTOP_CONTEXT)),
+        KeyBinding::new(primary!("1"), DesktopScaleFit, Some(DESKTOP_CONTEXT)),
+        KeyBinding::new(primary!("2"), DesktopScaleNative, Some(DESKTOP_CONTEXT)),
+        KeyBinding::new(primary!("3"), DesktopScaleStretch, Some(DESKTOP_CONTEXT)),
+        KeyBinding::new(primary!("r"), ReconnectDesktop, Some(DESKTOP_CONTEXT)),
     ]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
@@ -106,6 +116,12 @@ pub fn install_menus(cx: &mut App) {
             MenuItem::action(tr("app.cmd_vault"), ShowVault),
             MenuItem::action(tr("app.cmd_sftp"), ShowSftp),
             MenuItem::action(tr("app.cmd_refresh"), RefreshHosts),
+            MenuItem::separator(),
+            MenuItem::action(tr("app.cmd_desktop_scale_fit"), DesktopScaleFit),
+            MenuItem::action(tr("app.cmd_desktop_scale_native"), DesktopScaleNative),
+            MenuItem::action(tr("app.cmd_desktop_scale_stretch"), DesktopScaleStretch),
+            MenuItem::action(tr("app.cmd_desktop_scale_cycle"), CycleDesktopScale),
+            MenuItem::action(tr("app.cmd_reconnect_desktop"), ReconnectDesktop),
             MenuItem::separator(),
             MenuItem::action(tr("app.cmd_fullscreen"), ToggleFullScreen),
         ]),

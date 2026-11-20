@@ -27,7 +27,7 @@ impl InputMapper {
             RdpInput::Key { down, keysym } => key_ops(*down, *keysym),
             // Prefer one-char chunks via `map_paste_char` in the session loop.
             RdpInput::CutText(text) => text.chars().flat_map(paste_char_ops).collect(),
-            RdpInput::Refresh | RdpInput::Close => Vec::new(),
+            RdpInput::CutImage(_) | RdpInput::Refresh | RdpInput::Close => Vec::new(),
         };
         if ops.is_empty() {
             return Vec::new();

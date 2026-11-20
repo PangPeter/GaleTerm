@@ -429,16 +429,84 @@ impl GaleApp {
                 return;
             }
         };
+        let pane = tab.pane.clone();
+        cx.subscribe_in(
+            &pane,
+            window,
+            move |this, _, ev: &gale_desktop_view::DesktopPaneEvent, window, cx| {
+                if matches!(ev, gale_desktop_view::DesktopPaneEvent::Reconnect) {
+                    this.reconnect_desktop_tab(id, window, cx);
+                }
+            },
+        )
+        .detach();
         self.tabs.push(OpenTab {
             id,
             title: SharedString::from(profile.name),
             protocol,
-            content: TabContent::Desktop(tab.pane.clone()),
+            content: TabContent::Desktop(pane),
             backend: TabBackend::Desktop(tab),
             closed: false,
         });
         self.active_tab = Some(id);
         self.show_page(Page::Terminal, window, cx);
+    }
+
+    fn reconnect_desktop_tab(
+        &mut self,
+        id: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let prompts = self.prompts.clone();
+        let owner = cx.entity().downgrade();
+        let result = {
+            let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) else {
+                return;
+            };
+            let TabBackend::Desktop(desk) = &mut tab.backend else {
+                return;
+            };
+            desk.reconnect(
+                prompts,
+                move |_, cx| {
+                    let _ = owner.update(cx, |this, cx| {
+                        if let Some(tab) = this.tabs.iter_mut().find(|t| t.id == id) {
+                            tab.closed = true;
+                            cx.notify();
+                        }
+                    });
+                },
+                window,
+                cx,
+            )
+        };
+        match result {
+            Ok(()) => {
+                if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
+                    tab.closed = false;
+                }
+                cx.notify();
+            }
+            Err(err) => {
+                self.notify_user(i18n::tr_error("app.connect_failed", &format!("{err:#}")), cx);
+            }
+        }
+    }
+
+    fn reconnect_active_desktop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.active_tab else {
+            return;
+        };
+        let is_desktop = self
+            .tabs
+            .iter()
+            .find(|t| t.id == id)
+            .is_some_and(|t| t.backend.is_desktop());
+        if !is_desktop {
+            return;
+        }
+        self.reconnect_desktop_tab(id, window, cx);
     }
 
     fn push_prompt(&mut self, req: PromptRequest, window: &mut Window, cx: &mut Context<Self>) {
@@ -613,6 +681,28 @@ impl GaleApp {
             return;
         };
         pane.update(cx, |pane, cx| pane.paste_clipboard(cx));
+    }
+
+    fn with_active_desktop_pane(
+        &self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut gale_desktop_view::DesktopPane, &mut Context<gale_desktop_view::DesktopPane>),
+    ) {
+        let Some(tab) = self.active_open_tab() else {
+            return;
+        };
+        let TabContent::Desktop(pane) = &tab.content else {
+            return;
+        };
+        pane.update(cx, f);
+    }
+
+    fn set_desktop_scale(
+        &mut self,
+        mode: gale_desktop_view::DesktopScaleMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_active_desktop_pane(cx, |pane, cx| pane.set_scale_mode(mode, cx));
     }
 
     fn on_close_tab(&mut self, _: &menus::CloseTab, window: &mut Window, cx: &mut Context<Self>) {
@@ -942,6 +1032,21 @@ impl Render for GaleApp {
             }))
             .on_action(|_: &menus::Minimize, window, _| window.minimize_window())
             .on_action(|_: &menus::ToggleFullScreen, window, _| window.toggle_fullscreen())
+            .on_action(cx.listener(|this, _: &menus::DesktopScaleFit, _, cx| {
+                this.set_desktop_scale(gale_desktop_view::DesktopScaleMode::Fit, cx);
+            }))
+            .on_action(cx.listener(|this, _: &menus::DesktopScaleNative, _, cx| {
+                this.set_desktop_scale(gale_desktop_view::DesktopScaleMode::Native, cx);
+            }))
+            .on_action(cx.listener(|this, _: &menus::DesktopScaleStretch, _, cx| {
+                this.set_desktop_scale(gale_desktop_view::DesktopScaleMode::Stretch, cx);
+            }))
+            .on_action(cx.listener(|this, _: &menus::CycleDesktopScale, _, cx| {
+                this.with_active_desktop_pane(cx, |pane, cx| pane.cycle_scale_mode(cx));
+            }))
+            .on_action(cx.listener(|this, _: &menus::ReconnectDesktop, window, cx| {
+                this.reconnect_active_desktop(window, cx);
+            }))
             .relative()
             .size_full()
             .flex()
